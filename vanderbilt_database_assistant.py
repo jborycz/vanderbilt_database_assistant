@@ -5,10 +5,12 @@ import json
 import re
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import anthropic
+
+OUTPUTS_DIR = Path(__file__).resolve().parent / "outputs"
 
 SYSTEM_PROMPT = """\
 This agent recommends Vanderbilt Libraries databases using a structured 4-step process \
@@ -179,6 +181,34 @@ def load_databases(path: Path) -> str:
     return "\n".join(lines)
 
 
+def save_and_print(messages: list[dict], session_start: datetime) -> None:
+    """Write the session transcript to a dated markdown file and print it."""
+    if not messages:
+        return
+
+    OUTPUTS_DIR.mkdir(exist_ok=True)
+    timestamp = session_start.strftime("%Y%m%d_%H%M%S")
+    out = OUTPUTS_DIR / f"user_output_{timestamp}.md"
+
+    lines = [
+        "# Vanderbilt Libraries Database Recommender",
+        f"**Session:** {session_start.strftime('%B %d, %Y %I:%M:%S %p')}",
+        "",
+        "---",
+        "",
+    ]
+    for msg in messages:
+        heading = "## You" if msg["role"] == "user" else "## Assistant"
+        lines += [heading, "", msg["content"].strip(), "", "---", ""]
+
+    out.write_text("\n".join(lines), encoding="utf-8")
+
+    print(f"\nSession saved → {out}\n")
+    print("=" * 45)
+    print(out.read_text(encoding="utf-8"))
+    print("=" * 45)
+
+
 def run(databases_path: str = "databases.jsonl", initial_query: str | None = None) -> None:
     path = maybe_refresh(databases_path)
 
@@ -198,6 +228,7 @@ def run(databases_path: str = "databases.jsonl", initial_query: str | None = Non
     ]
 
     messages: list[dict] = []
+    session_start = datetime.now()
 
     print("Vanderbilt Libraries Database Recommender")
     print("─" * 45)
@@ -205,55 +236,59 @@ def run(databases_path: str = "databases.jsonl", initial_query: str | None = Non
     print("the best Vanderbilt Libraries databases for you.")
     print("Type 'quit' or press Ctrl-C to exit.\n")
 
-    if initial_query:
-        print(f"You: {initial_query}")
-        messages.append({"role": "user", "content": initial_query})
-        print("\nAssistant: ", end="", flush=True)
-        full_response = ""
-        with client.messages.stream(
-            model="claude-opus-4-7",
-            max_tokens=1024,
-            system=system,
-            messages=messages,
-            thinking={"type": "adaptive"},
-        ) as stream:
-            for text in stream.text_stream:
-                print(text, end="", flush=True)
-                full_response += text
-        print("\n")
-        messages.append({"role": "assistant", "content": full_response})
+    try:
+        if initial_query:
+            print(f"You: {initial_query}")
+            messages.append({"role": "user", "content": initial_query})
+            print("\nAssistant: ", end="", flush=True)
+            full_response = ""
+            with client.messages.stream(
+                model="claude-opus-4-7",
+                max_tokens=1024,
+                system=system,
+                messages=messages,
+                thinking={"type": "adaptive"},
+            ) as stream:
+                for text in stream.text_stream:
+                    print(text, end="", flush=True)
+                    full_response += text
+            print("\n")
+            messages.append({"role": "assistant", "content": full_response})
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
-            break
+        while True:
+            try:
+                user_input = input("You: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
 
-        if not user_input:
-            continue
-        if user_input.lower() in {"quit", "exit", "q"}:
-            print("Goodbye!")
-            break
+            if not user_input:
+                continue
+            if user_input.lower() in {"quit", "exit", "q"}:
+                print("Goodbye!")
+                break
 
-        messages.append({"role": "user", "content": user_input})
+            messages.append({"role": "user", "content": user_input})
 
-        print("\nAssistant: ", end="", flush=True)
-        full_response = ""
+            print("\nAssistant: ", end="", flush=True)
+            full_response = ""
 
-        with client.messages.stream(
-            model="claude-opus-4-7",
-            max_tokens=1024,
-            system=system,
-            messages=messages,
-            thinking={"type": "adaptive"},
-        ) as stream:
-            for text in stream.text_stream:
-                print(text, end="", flush=True)
-                full_response += text
+            with client.messages.stream(
+                model="claude-opus-4-7",
+                max_tokens=1024,
+                system=system,
+                messages=messages,
+                thinking={"type": "adaptive"},
+            ) as stream:
+                for text in stream.text_stream:
+                    print(text, end="", flush=True)
+                    full_response += text
 
-        print("\n")
-        messages.append({"role": "assistant", "content": full_response})
+            print("\n")
+            messages.append({"role": "assistant", "content": full_response})
+
+    finally:
+        save_and_print(messages, session_start)
 
 
 if __name__ == "__main__":
