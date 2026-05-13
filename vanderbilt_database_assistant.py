@@ -3,12 +3,24 @@
 
 import json
 import re
+import signal
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import anthropic
+
+SESSION_TIMEOUT_SECONDS = 60
+
+
+class _SessionTimeout(Exception):
+    pass
+
+
+def _timeout_handler(signum, frame):
+    raise _SessionTimeout
+
 
 OUTPUTS_DIR = Path(__file__).resolve().parent / "outputs"
 
@@ -143,7 +155,12 @@ def maybe_refresh(hint: str) -> Path:
                 "(LCSH enrichment may have fallen below the 95% threshold).\n"
                 "Proceeding with the most recent available catalog.\n"
             )
-        path = resolve_databases_path(hint)
+        # Use _latest_file directly so we pick up the freshly written dated file
+        # rather than re-resolving hint, which may still point to the same stale
+        # explicit path (e.g. an undated databases.jsonl that weekly_update never
+        # overwrites, or a direct path to the old databases_20260501.jsonl).
+        data_dir = Path(__file__).resolve().parent / "data"
+        path = _latest_file(data_dir, "databases") or resolve_databases_path(hint)
 
     return path
 
@@ -236,6 +253,9 @@ def run(databases_path: str = "databases.jsonl", initial_query: str | None = Non
     print("the best Vanderbilt Libraries databases for you.")
     print("Type 'quit' or press Ctrl-C to exit.\n")
 
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(SESSION_TIMEOUT_SECONDS)
+
     try:
         if initial_query:
             print(f"You: {initial_query}")
@@ -287,7 +307,10 @@ def run(databases_path: str = "databases.jsonl", initial_query: str | None = Non
             print("\n")
             messages.append({"role": "assistant", "content": full_response})
 
+    except _SessionTimeout:
+        print(f"\nSession time limit ({SESSION_TIMEOUT_SECONDS}s) reached. Goodbye!")
     finally:
+        signal.alarm(0)
         save_and_print(messages, session_start)
 
 
