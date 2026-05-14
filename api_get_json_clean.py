@@ -1,12 +1,16 @@
+import os
 import requests
 import json
 import csv
 import re
 import html
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- CONFIG ---
-CLIENT_ID = "1025"
-CLIENT_SECRET = "eb0a76b9f7cc8202a82aeabd0fbf8bde"
+CLIENT_ID = os.environ["SPRINGSHARE_CLIENT_ID"]
+CLIENT_SECRET = os.environ["SPRINGSHARE_CLIENT_SECRET"]
 
 TOKEN_URL = "https://lgapi-us.libapps.com/1.2/oauth/token"
 AZ_URL = "https://lgapi-us.libapps.com/1.2/az"
