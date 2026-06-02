@@ -4,9 +4,22 @@ import json
 import csv
 import re
 import html
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    env_path = Path(__file__).resolve().parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
 
 # --- CONFIG ---
 CLIENT_ID = os.environ["SPRINGSHARE_CLIENT_ID"]
