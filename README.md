@@ -66,6 +66,45 @@ outputs/user_output_YYYYMMDD_HHMMSS.md
 
 The file contains the full conversation transcript.
 
+## Running the backend in Docker
+
+The FastAPI backend in `backend/` can be run as a container. Requires Docker Desktop (or any Docker daemon) running locally.
+
+**Build the image:**
+
+```bash
+docker build -t vanderbilt-db-assistant .
+```
+
+**Run it (foreground, logs in terminal, `Ctrl-C` to stop):**
+
+```bash
+docker run --rm -p 8080:8080 -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" vanderbilt-db-assistant
+```
+
+**Run it (detached / background):**
+
+```bash
+docker run -d --name vdba -p 8080:8080 -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" vanderbilt-db-assistant
+```
+
+**Smoke-test it:**
+
+```bash
+curl http://localhost:8080/health
+# {"status":"ok"}
+```
+
+**Manage the detached container:**
+
+```bash
+docker logs -f vdba     # tail logs
+docker stop vdba        # stop
+docker rm vdba          # remove
+```
+
+The container listens on `8080` by default; override with `-e PORT=9000 -p 9000:9000`.
+
 ## Project structure
 
 ```
