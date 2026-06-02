@@ -105,6 +105,30 @@ docker rm vdba          # remove
 
 The container listens on `8080` by default; override with `-e PORT=9000 -p 9000:9000`.
 
+**Create and activate a virtual environment inside the container:**
+
+Open an interactive shell in the running container:
+
+```bash
+docker exec -it vdba bash
+```
+
+From inside the container, create the venv (one-time):
+
+```bash
+python -m venv vdba
+```
+
+Activate it (each time you enter the container):
+
+```bash
+source vdba/bin/activate
+```
+
+Your prompt will change to `(vdba) root@<container-id>:/app#`, confirming the
+environment is active. Run `deactivate` to exit it, or `exit` to leave the
+container shell.
+
 ## Project structure
 
 ```
