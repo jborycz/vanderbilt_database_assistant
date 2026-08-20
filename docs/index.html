@@ -306,8 +306,11 @@
     .fallback-link {
       font-size: 0.78rem;
       color: var(--muted);
-      line-height: 1.45;
+      line-height: 1.5;
       padding: 0.35rem 0.2rem 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
     }
     .fallback-link a {
       color: var(--dark-gold);
@@ -890,14 +893,36 @@
       wrap.appendChild(eq);
     }
     const fallback = el("div", { className: "fallback-link" });
-    fallback.appendChild(document.createTextNode("If a link below doesn't work, browse the full "));
-    fallback.appendChild(el("a", {
+
+    const azLine = el("div");
+    azLine.appendChild(document.createTextNode("If a link below doesn't work, browse the full "));
+    azLine.appendChild(el("a", {
       href: "https://researchguides.library.vanderbilt.edu/az/databases",
       target: "_blank",
       rel: "noopener noreferrer",
       text: "Databases A-Z list",
     }));
-    fallback.appendChild(document.createTextNode("."));
+    azLine.appendChild(document.createTextNode("."));
+    fallback.appendChild(azLine);
+
+    const helpLine = el("div");
+    helpLine.appendChild(document.createTextNode("Need help from a person? Reach out through the "));
+    helpLine.appendChild(el("a", {
+      href: "https://www.library.vanderbilt.edu/staff/",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      text: "staff directory",
+    }));
+    helpLine.appendChild(document.createTextNode(" or the "));
+    helpLine.appendChild(el("a", {
+      href: "https://www.library.vanderbilt.edu/research-support/",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      text: "research support page",
+    }));
+    helpLine.appendChild(document.createTextNode("."));
+    fallback.appendChild(helpLine);
+
     wrap.appendChild(fallback);
     (payload.recommendations || []).forEach((rec, i) => {
       wrap.appendChild(renderCard(rec, i));
