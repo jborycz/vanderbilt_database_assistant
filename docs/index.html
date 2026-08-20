@@ -11,9 +11,12 @@
       --black: #1B1B1B;
       --white: #FFFFFF;
       --bg: #F4F3EF;
+      --sidebar-bg: #FAF9F5;
       --border: #DDDBD4;
       --muted: #666;
       --code-bg: #F0EDE6;
+      --hover: #EFEBDF;
+      --active: #FBF6EA;
       --error-bg: #FEF2F2;
       --error-border: #FCA5A5;
       --error-text: #991B1B;
@@ -26,8 +29,145 @@
       background: var(--bg);
       color: var(--black);
       height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* ── App layout ── */
+    .app {
+      display: flex;
+      height: 100dvh;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
+      z-index: 20;
+    }
+
+    .sidebar-head {
+      padding: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .new-chat-btn {
+      width: 100%;
+      background: var(--gold);
+      color: var(--black);
+      border: none;
+      border-radius: 8px;
+      padding: 0.55rem 0.8rem;
+      font-weight: 600;
+      font-size: 0.88rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      transition: background 0.15s, color 0.15s;
+    }
+    .new-chat-btn:hover { background: var(--dark-gold); color: var(--white); }
+
+    .chat-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem 0.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .chat-list-empty {
+      padding: 0.8rem 0.6rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+      font-style: italic;
+    }
+
+    .chat-row {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.5rem 0.6rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+      position: relative;
+    }
+    .chat-row:hover { background: var(--hover); }
+    .chat-row.active {
+      background: var(--active);
+      border-left: 3px solid var(--gold);
+      padding-left: calc(0.6rem - 3px);
+    }
+
+    .chat-title {
+      flex: 1;
+      font-size: 0.85rem;
+      color: var(--black);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-title.active-title { font-weight: 600; color: var(--dark-gold); }
+
+    .chat-title-input {
+      flex: 1;
+      font-size: 0.85rem;
+      font-family: inherit;
+      border: 1px solid var(--gold);
+      border-radius: 4px;
+      padding: 0.15rem 0.35rem;
+      background: var(--white);
+      outline: none;
+      color: var(--black);
+      min-width: 0;
+    }
+
+    .chat-actions {
+      display: none;
+      gap: 0.15rem;
+      flex-shrink: 0;
+    }
+    .chat-row:hover .chat-actions,
+    .chat-row.active .chat-actions {
+      display: flex;
+    }
+
+    .icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 0.15rem 0.3rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      line-height: 1;
+      transition: color 0.1s, background 0.1s;
+    }
+    .icon-btn:hover { color: var(--dark-gold); background: var(--white); }
+    .icon-btn.danger:hover { color: var(--error-text); }
+
+    /* ── Sidebar backdrop (mobile) ── */
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+      z-index: 15;
+    }
+
+    /* ── Main pane ── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
 
     /* ── Header ── */
@@ -40,6 +180,18 @@
       border-bottom: 3px solid var(--gold);
       flex-shrink: 0;
     }
+
+    .hamburger {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--gold);
+      font-size: 1.4rem;
+      cursor: pointer;
+      padding: 0 0.3rem;
+      line-height: 1;
+    }
+    .hamburger:hover { color: var(--white); }
 
     .logo {
       width: 38px;
@@ -150,6 +302,18 @@
       text-transform: uppercase;
       margin-bottom: 0.25rem;
     }
+
+    .fallback-link {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.45;
+      padding: 0.35rem 0.2rem 0;
+    }
+    .fallback-link a {
+      color: var(--dark-gold);
+      text-decoration: underline;
+    }
+    .fallback-link a:hover { color: var(--black); }
 
     .card {
       background: var(--white);
@@ -343,6 +507,22 @@
     #send-btn:hover    { background: var(--dark-gold); color: var(--white); }
     #send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+    /* ── Responsive ── */
+    @media (max-width: 720px) {
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 100dvh;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+      }
+      .app.sidebar-open .sidebar { transform: translateX(0); }
+      .app.sidebar-open .sidebar-backdrop { display: block; }
+      .hamburger { display: block; }
+    }
+
     @media (max-width: 540px) {
       .bubble.user { max-width: 96%; }
       .card-head { align-items: flex-start; }
@@ -351,64 +531,152 @@
 </head>
 <body>
 
-<header>
-  <div class="logo">V</div>
-  <div>
-    <h1>Vanderbilt Database Assistant</h1>
-    <p>AI-powered research database suggestions</p>
-  </div>
-</header>
+<div class="app" id="app">
 
-<div id="messages">
-  <div class="welcome" id="welcome-card">
-    <h2>Find the right database for your research</h2>
-    <p>Describe your research topic and I'll recommend five Vanderbilt Libraries databases with ready-to-paste search strings.</p>
-    <div class="suggestions">
-      <button class="chip" onclick="useSuggestion(this)">Mental health interventions</button>
-      <button class="chip" onclick="useSuggestion(this)">Climate change policy</button>
-      <button class="chip" onclick="useSuggestion(this)">Machine learning in medicine</button>
-      <button class="chip" onclick="useSuggestion(this)">Civil War primary sources</button>
-      <button class="chip" onclick="useSuggestion(this)">Economic inequality data</button>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <button class="new-chat-btn" id="new-chat-btn" type="button">
+        <span aria-hidden="true">+</span> New chat
+      </button>
+    </div>
+    <div class="chat-list" id="chat-list"></div>
+  </aside>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <div class="main">
+    <header>
+      <button class="hamburger" id="hamburger" type="button" aria-label="Toggle chat history">☰</button>
+      <div class="logo">V</div>
+      <div>
+        <h1>Vanderbilt Database Assistant</h1>
+        <p>AI-powered research database suggestions</p>
+      </div>
+    </header>
+
+    <div id="messages"></div>
+
+    <div id="input-area">
+      <textarea id="user-input" placeholder="Describe your research topic…" rows="1"></textarea>
+      <button id="send-btn" type="button">Send</button>
     </div>
   </div>
-</div>
 
-<div id="input-area">
-  <textarea id="user-input" placeholder="Describe your research topic…" rows="1"></textarea>
-  <button id="send-btn" onclick="sendMessage()">Send</button>
 </div>
 
 <script>
   // ── CONFIG ──────────────────────────────────────────────────────────────────
-  // When served from localhost, hit the local backend; otherwise use the Render deploy.
   const BACKEND_URL = (["localhost", "127.0.0.1"].includes(location.hostname))
     ? "http://localhost:8000"
     : "https://vanderbilt-database-assistant.onrender.com";
+
+  const STORAGE_KEY = "vdba.chats.v1";
+  const MAX_TITLE_LEN = 48;
+  const SUGGESTIONS = [
+    "Mental health interventions",
+    "Climate change policy",
+    "Machine learning in medicine",
+    "Civil War primary sources",
+    "Economic inequality data",
+  ];
   // ────────────────────────────────────────────────────────────────────────────
 
-  const messagesEl = document.getElementById("messages");
-  const inputEl    = document.getElementById("user-input");
-  const sendBtn    = document.getElementById("send-btn");
-  const history    = [];
+  const appEl        = document.getElementById("app");
+  const sidebarEl    = document.getElementById("sidebar");
+  const backdropEl   = document.getElementById("sidebar-backdrop");
+  const chatListEl   = document.getElementById("chat-list");
+  const newChatBtn   = document.getElementById("new-chat-btn");
+  const hamburgerBtn = document.getElementById("hamburger");
+  const messagesEl   = document.getElementById("messages");
+  const inputEl      = document.getElementById("user-input");
+  const sendBtn      = document.getElementById("send-btn");
 
-  inputEl.addEventListener("input", () => {
-    inputEl.style.height = "auto";
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
-  });
-
-  inputEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  });
-
-  function useSuggestion(btn) {
-    inputEl.value = btn.textContent.trim();
-    sendMessage();
+  // ── Storage ────────────────────────────────────────────────────────────────
+  function loadStore() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { chats: {}, active_id: null };
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") throw new Error("bad store");
+      return { chats: parsed.chats || {}, active_id: parsed.active_id || null };
+    } catch {
+      return { chats: {}, active_id: null };
+    }
   }
 
-  function scrollBottom() {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+  function saveStore() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }
 
+  let store = loadStore();
+
+  // ── Chat model ─────────────────────────────────────────────────────────────
+  function newId() {
+    return "c_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function createChat() {
+    const id = newId();
+    const chat = {
+      id,
+      title: "New chat",
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      turns: [],
+    };
+    store.chats[id] = chat;
+    store.active_id = id;
+    saveStore();
+    return chat;
+  }
+
+  function activeChat() {
+    if (store.active_id && store.chats[store.active_id]) return store.chats[store.active_id];
+    return null;
+  }
+
+  function ensureActiveChat() {
+    let chat = activeChat();
+    if (!chat) chat = createChat();
+    return chat;
+  }
+
+  function deleteChat(id) {
+    if (!store.chats[id]) return;
+    delete store.chats[id];
+    if (store.active_id === id) {
+      const remaining = sortedChats();
+      store.active_id = remaining.length ? remaining[0].id : null;
+    }
+    saveStore();
+  }
+
+  function renameChat(id, title) {
+    const chat = store.chats[id];
+    if (!chat) return;
+    title = title.trim().slice(0, 80);
+    if (!title) return;
+    chat.title = title;
+    chat.updated_at = Date.now();
+    saveStore();
+  }
+
+  function sortedChats() {
+    return Object.values(store.chats).sort((a, b) => b.updated_at - a.updated_at);
+  }
+
+  function autoTitleFrom(text) {
+    const clean = text.trim().replace(/\s+/g, " ");
+    return clean.length > MAX_TITLE_LEN ? clean.slice(0, MAX_TITLE_LEN - 1) + "…" : clean;
+  }
+
+  function apiMessages(chat) {
+    return chat.turns.map(t => t.role === "user"
+      ? { role: "user", content: t.text }
+      : { role: "assistant", content: t.payload.raw_assistant_message || JSON.stringify(t.payload) });
+  }
+
+  // ── DOM helpers ────────────────────────────────────────────────────────────
   function el(tag, opts = {}, ...children) {
     const node = document.createElement(tag);
     if (opts.className) node.className = opts.className;
@@ -417,30 +685,129 @@
     if (opts.href)      node.href = opts.href;
     if (opts.target)    node.target = opts.target;
     if (opts.rel)       node.rel = opts.rel;
+    if (opts.title)     node.title = opts.title;
     if (opts.onClick)   node.addEventListener("click", opts.onClick);
     for (const c of children) if (c) node.appendChild(c);
     return node;
   }
 
-  function appendUserBubble(text) {
-    const div = el("div", { className: "bubble user", text });
-    messagesEl.appendChild(div);
-    scrollBottom();
+  function scrollBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function appendTyping() {
-    const div = document.createElement("div");
-    div.className = "typing";
-    div.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-    messagesEl.appendChild(div);
-    scrollBottom();
-    return div;
+  // ── Sidebar rendering ──────────────────────────────────────────────────────
+  function renderChatList() {
+    chatListEl.innerHTML = "";
+    const chats = sortedChats();
+    if (chats.length === 0) {
+      chatListEl.appendChild(el("div", { className: "chat-list-empty", text: "No chats yet." }));
+      return;
+    }
+    for (const chat of chats) {
+      chatListEl.appendChild(renderChatRow(chat));
+    }
   }
 
-  function appendError(msg) {
-    const div = el("div", { className: "error-banner", text: msg });
-    messagesEl.appendChild(div);
-    scrollBottom();
+  function renderChatRow(chat) {
+    const isActive = chat.id === store.active_id;
+    const row = el("div", {
+      className: "chat-row" + (isActive ? " active" : ""),
+      title: chat.title,
+    });
+    row.dataset.chatId = chat.id;
+
+    const titleEl = el("div", {
+      className: "chat-title" + (isActive ? " active-title" : ""),
+      text: chat.title,
+    });
+    titleEl.addEventListener("click", (e) => {
+      // Don't switch when clicking action buttons.
+      if (e.target.closest(".chat-actions")) return;
+      switchToChat(chat.id);
+    });
+
+    const renameBtn = el("button", {
+      className: "icon-btn",
+      title: "Rename",
+      html: "&#9998;", // pencil
+    });
+    renameBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startRename(row, chat);
+    });
+
+    const delBtn = el("button", {
+      className: "icon-btn danger",
+      title: "Delete",
+      html: "&#128465;", // trash
+    });
+    delBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      confirmDelete(chat);
+    });
+
+    const actions = el("div", { className: "chat-actions" }, renameBtn, delBtn);
+
+    row.appendChild(titleEl);
+    row.appendChild(actions);
+    return row;
+  }
+
+  function startRename(row, chat) {
+    const titleEl = row.querySelector(".chat-title");
+    if (!titleEl) return;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "chat-title-input";
+    input.value = chat.title;
+    input.maxLength = 80;
+    row.replaceChild(input, titleEl);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      if (commit && input.value.trim()) {
+        renameChat(chat.id, input.value);
+      }
+      renderChatList();
+    };
+    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+  }
+
+  function confirmDelete(chat) {
+    if (!confirm(`Delete “${chat.title}”?`)) return;
+    deleteChat(chat.id);
+    renderChatList();
+    renderActiveChat();
+  }
+
+  // ── Chat body rendering ────────────────────────────────────────────────────
+  function renderWelcome() {
+    const welcome = el("div", { className: "welcome" });
+    welcome.appendChild(el("h2", { text: "Find the right database for your research" }));
+    welcome.appendChild(el("p", { text: "Describe your research topic and I'll recommend five Vanderbilt Libraries databases with ready-to-paste search strings." }));
+    const suggestions = el("div", { className: "suggestions" });
+    for (const s of SUGGESTIONS) {
+      const chip = el("button", {
+        className: "chip",
+        text: s,
+        onClick: () => { inputEl.value = s; sendMessage(); },
+      });
+      suggestions.appendChild(chip);
+    }
+    welcome.appendChild(suggestions);
+    messagesEl.appendChild(welcome);
+  }
+
+  function renderUserBubble(text) {
+    messagesEl.appendChild(el("div", { className: "bubble user", text }));
   }
 
   function renderCard(rec, i) {
@@ -516,34 +883,118 @@
 
   function renderResultSet(payload) {
     const wrap = el("div", { className: "result-set" });
-
     if (payload.enhanced_query) {
       const eq = el("div", { className: "enhanced-query" });
       eq.appendChild(el("span", { className: "label", text: "Interpreted query" }));
       eq.appendChild(document.createTextNode(payload.enhanced_query));
       wrap.appendChild(eq);
     }
-
+    const fallback = el("div", { className: "fallback-link" });
+    fallback.appendChild(document.createTextNode("If a link below doesn't work, browse the full "));
+    fallback.appendChild(el("a", {
+      href: "https://researchguides.library.vanderbilt.edu/az/databases",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      text: "Databases A-Z list",
+    }));
+    fallback.appendChild(document.createTextNode("."));
+    wrap.appendChild(fallback);
     (payload.recommendations || []).forEach((rec, i) => {
       wrap.appendChild(renderCard(rec, i));
     });
-
     messagesEl.appendChild(wrap);
+  }
+
+  function renderActiveChat() {
+    messagesEl.innerHTML = "";
+    const chat = activeChat();
+    if (!chat || chat.turns.length === 0) {
+      renderWelcome();
+      return;
+    }
+    for (const turn of chat.turns) {
+      if (turn.role === "user") renderUserBubble(turn.text);
+      else renderResultSet(turn.payload);
+    }
     scrollBottom();
+  }
+
+  // ── Chat operations ────────────────────────────────────────────────────────
+  function switchToChat(id) {
+    if (store.active_id === id) return;
+    store.active_id = id;
+    saveStore();
+    renderChatList();
+    renderActiveChat();
+    closeSidebarMobile();
+  }
+
+  function createChatAndSwitch() {
+    createChat();
+    renderChatList();
+    renderActiveChat();
+    inputEl.focus();
+    closeSidebarMobile();
+  }
+
+  // ── Sidebar mobile toggle ──────────────────────────────────────────────────
+  function openSidebarMobile()  { appEl.classList.add("sidebar-open"); }
+  function closeSidebarMobile() { appEl.classList.remove("sidebar-open"); }
+  function toggleSidebarMobile() { appEl.classList.toggle("sidebar-open"); }
+
+  hamburgerBtn.addEventListener("click", toggleSidebarMobile);
+  backdropEl.addEventListener("click", closeSidebarMobile);
+  newChatBtn.addEventListener("click", createChatAndSwitch);
+  sendBtn.addEventListener("click", sendMessage);
+
+  // ── Input handling ─────────────────────────────────────────────────────────
+  inputEl.addEventListener("input", () => {
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+  });
+
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  // ── Send message ───────────────────────────────────────────────────────────
+  function appendError(msg) {
+    messagesEl.appendChild(el("div", { className: "error-banner", text: msg }));
+    scrollBottom();
+  }
+
+  function appendTyping() {
+    const div = document.createElement("div");
+    div.className = "typing";
+    div.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    messagesEl.appendChild(div);
+    scrollBottom();
+    return div;
   }
 
   async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text || sendBtn.disabled) return;
 
-    document.getElementById("welcome-card")?.remove();
+    const chat = ensureActiveChat();
+    const firstMessage = chat.turns.length === 0;
 
     inputEl.value = "";
     inputEl.style.height = "auto";
     sendBtn.disabled = true;
 
-    appendUserBubble(text);
-    history.push({ role: "user", content: text });
+    // Remove welcome card if it's still there
+    const welcomeEl = messagesEl.querySelector(".welcome");
+    if (welcomeEl) welcomeEl.remove();
+
+    // Optimistically append user bubble
+    renderUserBubble(text);
+    chat.turns.push({ role: "user", text });
+    chat.updated_at = Date.now();
+    if (firstMessage) chat.title = autoTitleFrom(text);
+    saveStore();
+    renderChatList();
+    scrollBottom();
 
     const typing = appendTyping();
 
@@ -551,7 +1002,7 @@
       const res = await fetch(`${BACKEND_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages: apiMessages(chat) }),
       });
 
       typing.remove();
@@ -563,22 +1014,32 @@
 
       const payload = await res.json();
       renderResultSet(payload);
+      scrollBottom();
 
-      // Push the raw assistant message so multi-turn context is preserved.
-      history.push({
-        role: "assistant",
-        content: payload.raw_assistant_message || JSON.stringify(payload),
-      });
+      chat.turns.push({ role: "assistant", payload });
+      chat.updated_at = Date.now();
+      saveStore();
+      renderChatList();
 
     } catch (err) {
       typing.remove();
       appendError(`Something went wrong: ${err.message}. The server may be waking up from sleep — please wait a moment and try again.`);
-      history.pop(); // undo the user message since we got no response
+      // Roll back the optimistic user turn since we got no response.
+      chat.turns.pop();
+      if (firstMessage) chat.title = "New chat";
+      saveStore();
+      renderChatList();
     }
 
     sendBtn.disabled = false;
     inputEl.focus();
   }
+
+  // ── Boot ───────────────────────────────────────────────────────────────────
+  ensureActiveChat();
+  renderChatList();
+  renderActiveChat();
+  inputEl.focus();
 </script>
 
 </body>
