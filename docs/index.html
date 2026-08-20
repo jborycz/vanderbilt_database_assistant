@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vanderbilt Database Assistant</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
     :root {
       --gold: #CFAE70;
@@ -13,6 +12,8 @@
       --white: #FFFFFF;
       --bg: #F4F3EF;
       --border: #DDDBD4;
+      --muted: #666;
+      --code-bg: #F0EDE6;
       --error-bg: #FEF2F2;
       --error-border: #FCA5A5;
       --error-text: #991B1B;
@@ -65,7 +66,7 @@
       padding: 1.25rem 1rem;
       display: flex;
       flex-direction: column;
-      gap: 0.875rem;
+      gap: 1rem;
       scroll-behavior: smooth;
     }
 
@@ -77,13 +78,13 @@
       border-radius: 10px;
       padding: 1.1rem 1.25rem 1rem;
       align-self: center;
-      max-width: 560px;
+      max-width: 620px;
       width: 100%;
       text-align: center;
     }
 
     .welcome h2 { font-size: 0.95rem; color: var(--dark-gold); margin-bottom: 0.4rem; }
-    .welcome p  { font-size: 0.85rem; color: #555; line-height: 1.55; }
+    .welcome p  { font-size: 0.85rem; color: var(--muted); line-height: 1.55; }
 
     .suggestions {
       display: flex;
@@ -105,8 +106,12 @@
     }
     .chip:hover { background: var(--gold); color: var(--black); }
 
-    /* ── Bubbles ── */
-    .bubble {
+    /* ── User bubble ── */
+    .bubble.user {
+      background: var(--black);
+      color: var(--white);
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
       max-width: 82%;
       padding: 0.65rem 0.9rem;
       border-radius: 14px;
@@ -115,33 +120,145 @@
       word-break: break-word;
     }
 
-    .bubble.user {
-      background: var(--black);
-      color: var(--white);
-      align-self: flex-end;
-      border-bottom-right-radius: 4px;
+    /* ── Result set ── */
+    .result-set {
+      align-self: stretch;
+      width: 100%;
+      max-width: 780px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
     }
 
-    .bubble.assistant {
+    .enhanced-query {
       background: var(--white);
       border: 1px solid var(--border);
-      align-self: flex-start;
-      border-bottom-left-radius: 4px;
-      max-width: 92%;
+      border-left: 4px solid var(--gold);
+      border-radius: 10px;
+      padding: 0.7rem 0.9rem;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: var(--black);
+    }
+    .enhanced-query .label {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--dark-gold);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 0.25rem;
     }
 
-    /* markdown inside assistant bubble */
-    .bubble.assistant p              { margin-bottom: 0.5em; }
-    .bubble.assistant p:last-child   { margin-bottom: 0; }
-    .bubble.assistant h1,
-    .bubble.assistant h2,
-    .bubble.assistant h3             { margin: 0.7em 0 0.2em; font-size: 0.95rem; }
-    .bubble.assistant ul,
-    .bubble.assistant ol             { margin: 0.3em 0 0.3em 1.3em; }
-    .bubble.assistant li             { margin-bottom: 0.25em; }
-    .bubble.assistant a              { color: var(--dark-gold); word-break: break-all; }
-    .bubble.assistant strong         { font-weight: 600; }
-    .bubble.assistant code           { font-size: 0.85em; background: #F0EDE6; padding: 0.1em 0.3em; border-radius: 3px; }
+    .card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      background: var(--gold);
+      color: var(--black);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transform: translateY(2px);
+    }
+
+    .card-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--black);
+      text-decoration: none;
+    }
+    .card-name:hover { color: var(--dark-gold); text-decoration: underline; }
+    .card-name .ext {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-left: 0.25rem;
+    }
+
+    .card-desc { font-size: 0.85rem; color: var(--black); line-height: 1.5; }
+    .card-why {
+      font-size: 0.83rem;
+      color: var(--dark-gold);
+      line-height: 1.5;
+      font-style: italic;
+    }
+
+    .search-block {
+      background: var(--code-bg);
+      border-radius: 6px;
+      padding: 0.55rem 0.7rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .search-block code {
+      flex: 1;
+      font-size: 0.8rem;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .copy-btn:hover { border-color: var(--dark-gold); color: var(--dark-gold); }
+    .copy-btn.copied { border-color: var(--gold); color: var(--dark-gold); background: #FBF6EA; }
+
+    .actions {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .action-btn {
+      background: var(--gold);
+      color: var(--black);
+      text-decoration: none;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      transition: background 0.15s, color 0.15s;
+    }
+    .action-btn:hover { background: var(--dark-gold); color: var(--white); }
+    .action-btn.secondary {
+      background: transparent;
+      color: var(--dark-gold);
+      border: 1px solid var(--gold);
+    }
+    .action-btn.secondary:hover { background: var(--gold); color: var(--black); }
+
+    .unmatched-note {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-style: italic;
+    }
 
     /* ── Typing indicator ── */
     .typing {
@@ -152,11 +269,9 @@
       background: var(--white);
       border: 1px solid var(--border);
       border-radius: 14px;
-      border-bottom-left-radius: 4px;
       align-self: flex-start;
       width: fit-content;
     }
-
     .dot {
       width: 7px; height: 7px;
       background: var(--gold);
@@ -168,7 +283,7 @@
 
     @keyframes bounce {
       0%, 60%, 100% { transform: translateY(0); }
-      30%            { transform: translateY(-7px); }
+      30%           { transform: translateY(-7px); }
     }
 
     /* ── Error banner ── */
@@ -180,6 +295,8 @@
       border-radius: 10px;
       font-size: 0.85rem;
       align-self: stretch;
+      max-width: 780px;
+      margin: 0 auto;
       line-height: 1.45;
     }
 
@@ -227,7 +344,8 @@
     #send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
     @media (max-width: 540px) {
-      .bubble, .bubble.assistant { max-width: 96%; }
+      .bubble.user { max-width: 96%; }
+      .card-head { align-items: flex-start; }
     }
   </style>
 </head>
@@ -244,7 +362,7 @@
 <div id="messages">
   <div class="welcome" id="welcome-card">
     <h2>Find the right database for your research</h2>
-    <p>Describe your research topic and I'll recommend the best Vanderbilt Libraries databases for you.</p>
+    <p>Describe your research topic and I'll recommend five Vanderbilt Libraries databases with ready-to-paste search strings.</p>
     <div class="suggestions">
       <button class="chip" onclick="useSuggestion(this)">Mental health interventions</button>
       <button class="chip" onclick="useSuggestion(this)">Climate change policy</button>
@@ -262,9 +380,10 @@
 
 <script>
   // ── CONFIG ──────────────────────────────────────────────────────────────────
-  // After deploying to Render, replace the URL below with your actual backend URL.
-  // Example: "https://vanderbilt-db-assistant.onrender.com"
-  const BACKEND_URL = "https://vanderbilt-database-assistant.onrender.com";
+  // When served from localhost, hit the local backend; otherwise use the Render deploy.
+  const BACKEND_URL = (["localhost", "127.0.0.1"].includes(location.hostname))
+    ? "http://localhost:8000"
+    : "https://vanderbilt-database-assistant.onrender.com";
   // ────────────────────────────────────────────────────────────────────────────
 
   const messagesEl = document.getElementById("messages");
@@ -272,7 +391,6 @@
   const sendBtn    = document.getElementById("send-btn");
   const history    = [];
 
-  // Auto-grow textarea
   inputEl.addEventListener("input", () => {
     inputEl.style.height = "auto";
     inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
@@ -291,14 +409,23 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function appendBubble(role, html = "", raw = "") {
-    const div = document.createElement("div");
-    div.className = `bubble ${role}`;
-    if (html) div.innerHTML = html;
-    else      div.textContent = raw;
+  function el(tag, opts = {}, ...children) {
+    const node = document.createElement(tag);
+    if (opts.className) node.className = opts.className;
+    if (opts.text)      node.textContent = opts.text;
+    if (opts.html)      node.innerHTML = opts.html;
+    if (opts.href)      node.href = opts.href;
+    if (opts.target)    node.target = opts.target;
+    if (opts.rel)       node.rel = opts.rel;
+    if (opts.onClick)   node.addEventListener("click", opts.onClick);
+    for (const c of children) if (c) node.appendChild(c);
+    return node;
+  }
+
+  function appendUserBubble(text) {
+    const div = el("div", { className: "bubble user", text });
     messagesEl.appendChild(div);
     scrollBottom();
-    return div;
   }
 
   function appendTyping() {
@@ -308,6 +435,101 @@
     messagesEl.appendChild(div);
     scrollBottom();
     return div;
+  }
+
+  function appendError(msg) {
+    const div = el("div", { className: "error-banner", text: msg });
+    messagesEl.appendChild(div);
+    scrollBottom();
+  }
+
+  function renderCard(rec, i) {
+    const badge = el("span", { className: "badge", text: String(i + 1) });
+
+    let nameNode;
+    if (rec.direct_url) {
+      nameNode = el("a", {
+        className: "card-name",
+        href: rec.direct_url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        text: rec.name,
+      });
+      nameNode.appendChild(el("span", { className: "ext", text: "↗" }));
+    } else {
+      nameNode = el("span", { className: "card-name", text: rec.name });
+    }
+
+    const head = el("div", { className: "card-head" }, badge, nameNode);
+    if (!rec.matched) {
+      head.appendChild(el("span", {
+        className: "unmatched-note",
+        text: "(not found in current catalog)",
+      }));
+    }
+
+    const desc = el("div", { className: "card-desc", text: rec.refined_description });
+    const why  = el("div", { className: "card-why",  text: rec.why_it_fits });
+
+    const codeEl = el("code", { text: rec.search_string || "" });
+    const copyBtn = el("button", {
+      className: "copy-btn",
+      text: "Copy",
+      onClick: async () => {
+        try {
+          await navigator.clipboard.writeText(rec.search_string || "");
+          copyBtn.textContent = "Copied";
+          copyBtn.classList.add("copied");
+          setTimeout(() => {
+            copyBtn.textContent = "Copy";
+            copyBtn.classList.remove("copied");
+          }, 1400);
+        } catch {
+          copyBtn.textContent = "Failed";
+        }
+      },
+    });
+    const searchBlock = el("div", { className: "search-block" }, codeEl, copyBtn);
+
+    const actions = el("div", { className: "actions" });
+    if (rec.primo_search_url) {
+      actions.appendChild(el("a", {
+        className: "action-btn",
+        href: rec.primo_search_url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        text: "Search in Primo",
+      }));
+    }
+    if (rec.direct_url) {
+      actions.appendChild(el("a", {
+        className: "action-btn secondary",
+        href: rec.direct_url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        text: "Open database",
+      }));
+    }
+
+    return el("div", { className: "card" }, head, desc, why, searchBlock, actions);
+  }
+
+  function renderResultSet(payload) {
+    const wrap = el("div", { className: "result-set" });
+
+    if (payload.enhanced_query) {
+      const eq = el("div", { className: "enhanced-query" });
+      eq.appendChild(el("span", { className: "label", text: "Interpreted query" }));
+      eq.appendChild(document.createTextNode(payload.enhanced_query));
+      wrap.appendChild(eq);
+    }
+
+    (payload.recommendations || []).forEach((rec, i) => {
+      wrap.appendChild(renderCard(rec, i));
+    });
+
+    messagesEl.appendChild(wrap);
+    scrollBottom();
   }
 
   async function sendMessage() {
@@ -320,7 +542,7 @@
     inputEl.style.height = "auto";
     sendBtn.disabled = true;
 
-    appendBubble("user", "", text);
+    appendUserBubble(text);
     history.push({ role: "user", content: text });
 
     const typing = appendTyping();
@@ -332,50 +554,25 @@
         body: JSON.stringify({ messages: history }),
       });
 
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-
       typing.remove();
-      const assistantBubble = appendBubble("assistant");
 
-      let fullText = "";
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop(); // keep incomplete line
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6).trim();
-          if (payload === "[DONE]") break;
-
-          let parsed;
-          try { parsed = JSON.parse(payload); } catch { continue; }
-
-          if (parsed.error) throw new Error(parsed.error);
-          if (parsed.text) {
-            fullText += parsed.text;
-            assistantBubble.innerHTML = marked.parse(fullText);
-            scrollBottom();
-          }
-        }
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Server returned ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
       }
 
-      history.push({ role: "assistant", content: fullText });
+      const payload = await res.json();
+      renderResultSet(payload);
+
+      // Push the raw assistant message so multi-turn context is preserved.
+      history.push({
+        role: "assistant",
+        content: payload.raw_assistant_message || JSON.stringify(payload),
+      });
 
     } catch (err) {
       typing.remove();
-      const banner = document.createElement("div");
-      banner.className = "error-banner";
-      banner.textContent = `Something went wrong: ${err.message}. The server may be waking up from sleep — please wait a moment and try again.`;
-      messagesEl.appendChild(banner);
-      scrollBottom();
+      appendError(`Something went wrong: ${err.message}. The server may be waking up from sleep — please wait a moment and try again.`);
       history.pop(); // undo the user message since we got no response
     }
 
