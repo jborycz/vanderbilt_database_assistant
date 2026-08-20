@@ -135,7 +135,7 @@ Then:
 
 ```bash
 curl https://<service-url>/health
-# {"status":"ok"}
+# {"status":"ok","catalog_size":887}
 ```
 
 ### 7. Point the frontend at the new backend
@@ -178,7 +178,7 @@ Balancer, multiple containers/services, or tighter network controls.
 4. **Create a Fargate service** in that cluster, attached to an Application
    Load Balancer target group forwarding port 80/443 → container port 8080.
 5. **Health check path:** point the target group's health check at `/health`
-   (already implemented in [backend/main.py](backend/main.py:117)).
+   (already implemented in [backend/main.py](backend/main.py:178)).
 6. Redeploy by pushing a new image tag and updating the service
    (`aws ecs update-service --force-new-deployment`).
 
