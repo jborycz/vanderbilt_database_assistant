@@ -272,6 +272,22 @@
       word-break: break-word;
     }
 
+    /* ── Assistant text bubble (chat-mode replies) ── */
+    .bubble.assistant {
+      background: var(--white);
+      border: 1px solid var(--border);
+      color: var(--black);
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+      max-width: 92%;
+      padding: 0.65rem 0.9rem;
+      border-radius: 14px;
+      line-height: 1.55;
+      font-size: 0.9rem;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
     /* ── Result set ── */
     .result-set {
       align-self: stretch;
@@ -674,9 +690,17 @@
   }
 
   function apiMessages(chat) {
-    return chat.turns.map(t => t.role === "user"
-      ? { role: "user", content: t.text }
-      : { role: "assistant", content: t.payload.raw_assistant_message || JSON.stringify(t.payload) });
+    return chat.turns.map(t => {
+      if (t.role === "user") return { role: "user", content: t.text };
+      // Assistant turn: prefer the raw JSON we stored; fall back to a shape
+      // compatible with either mode.
+      let content = t.raw_assistant_message;
+      if (!content) {
+        if (t.mode === "chat") content = JSON.stringify({ mode: "chat", text: t.text || "" });
+        else content = JSON.stringify(t.payload || {});
+      }
+      return { role: "assistant", content };
+    });
   }
 
   // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -930,6 +954,10 @@
     messagesEl.appendChild(wrap);
   }
 
+  function renderAssistantTextBubble(text) {
+    messagesEl.appendChild(el("div", { className: "bubble assistant", text }));
+  }
+
   function renderActiveChat() {
     messagesEl.innerHTML = "";
     const chat = activeChat();
@@ -938,8 +966,14 @@
       return;
     }
     for (const turn of chat.turns) {
-      if (turn.role === "user") renderUserBubble(turn.text);
-      else renderResultSet(turn.payload);
+      if (turn.role === "user") {
+        renderUserBubble(turn.text);
+      } else if (turn.mode === "chat") {
+        renderAssistantTextBubble(turn.text || "");
+      } else {
+        // Research mode, or legacy turns without a mode field.
+        renderResultSet(turn.payload || {});
+      }
     }
     scrollBottom();
   }
@@ -1038,10 +1072,26 @@
       }
 
       const payload = await res.json();
-      renderResultSet(payload);
-      scrollBottom();
 
-      chat.turns.push({ role: "assistant", payload });
+      if (payload.mode === "chat") {
+        const text = payload.text || "";
+        renderAssistantTextBubble(text);
+        chat.turns.push({
+          role: "assistant",
+          mode: "chat",
+          text,
+          raw_assistant_message: payload.raw_assistant_message,
+        });
+      } else {
+        renderResultSet(payload);
+        chat.turns.push({
+          role: "assistant",
+          mode: "research",
+          payload,
+          raw_assistant_message: payload.raw_assistant_message,
+        });
+      }
+      scrollBottom();
       chat.updated_at = Date.now();
       saveStore();
       renderChatList();
