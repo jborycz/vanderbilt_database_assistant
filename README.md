@@ -129,12 +129,28 @@ Your prompt will change to `(vdba) root@<container-id>:/app#`, confirming the
 environment is active. Run `deactivate` to exit it, or `exit` to leave the
 container shell.
 
+## Deploying to AWS
+
+The live site (https://jborycz.github.io/vanderbilt_database_assistant/) runs
+its backend on AWS App Runner, built from this same Docker image. See
+[AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md) for the one-time setup. Once that's
+done, redeploying after a code change is one command:
+
+```bash
+./redeploy.sh
+```
+
+This rebuilds the image, pushes it to ECR, and tells App Runner to redeploy —
+see the script for the individual steps if you'd rather run them by hand.
+
 ## Project structure
 
 ```
 vanderbilt_database_assistant.py   # main assistant (run this)
 weekly_update.py                   # fetch a fresh catalog from the LibApps API
 api_get_json_clean.py              # LibApps API client and data cleaning helpers
+redeploy.sh                        # rebuild + push + redeploy the backend to AWS
+deploy-env.sh                      # AWS shell variables for redeploy.sh (gitignored)
 requirements.txt                   # Python dependencies
 data/                              # catalog snapshots (JSONL, dated)
 outputs/                           # saved session transcripts

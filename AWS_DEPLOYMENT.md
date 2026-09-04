@@ -5,12 +5,13 @@ This guide walks through hosting the existing `backend/` FastAPI service (see
 repo. It does not require any changes to the application code or
 `requirements.txt` — it only adds AWS-side configuration.
 
-The recommended path is **AWS App Runner**, which is the closest AWS
-equivalent to the existing Render setup ([render.yaml](render.yaml)): you
-give it a container image and it handles the load balancer, TLS, scaling,
-and public URL for you. An alternative using **ECS Fargate** is included at
-the end for cases where you need more control (VPC placement, custom
-networking, multiple services, etc.).
+The recommended path is **AWS App Runner**: you give it a container image and
+it handles the load balancer, TLS, scaling, and public URL for you. An
+alternative using **ECS Fargate** is included at the end for cases where you
+need more control (VPC placement, custom networking, multiple services, etc.).
+
+This is the assistant's only hosting target — an earlier Render deployment
+has been retired; `render.yaml` and `Procfile` no longer exist in this repo.
 
 This guide was validated end-to-end against a real AWS account; every step
 below reflects what actually worked, including three things that are easy to
@@ -267,22 +268,29 @@ aws apprunner list-services --query 'ServiceSummaryList[].ServiceName'   # confi
 
 ### 8. Point the frontend at the new backend
 
-[docs/index.html](docs/index.html) sets `BACKEND_URL` to your Render URL for
-any non-localhost origin. Change it to your App Runner `ServiceUrl` (from
-step 6/7's output, prefixed with `https://`). This is the only place outside
-of AWS config that needs a value changed — a config value, not application
-logic — and it only takes effect once you commit and publish this file
+[docs/index.html](docs/index.html) sets `BACKEND_URL` for any non-localhost
+origin to the App Runner `ServiceUrl` from step 6/7's output, prefixed with
+`https://`. Already done for the current service — only relevant again if
+you ever delete and recreate the App Runner service (which gets a new URL
+each time). It only takes effect once you commit and publish this file
 wherever `docs/` is actually served from (e.g. GitHub Pages).
 
 ### 9. Redeploying after code changes
 
-Whenever `backend/`, `data/`, or the `Dockerfile` change:
+Run `./redeploy.sh` from the project root. It rebuilds the image for the
+correct architecture, pushes it to ECR, and tells App Runner to redeploy —
+see [redeploy.sh](redeploy.sh) for what it does step by step. It reads
+`AWS_PROFILE`/`AWS_REGION`/`AWS_ACCOUNT_ID`/`ECR_REPO`/`APP_RUNNER_SERVICE_ARN`
+from `deploy-env.sh`, so `source deploy-env.sh` first (or just run the
+script, which sources it for you).
+
+If you'd rather run the steps by hand:
 
 ```bash
 docker build --platform linux/amd64 -t "$ECR_REPO" .
 docker tag "$ECR_REPO:latest" "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:latest"
 docker push "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:latest"
-aws apprunner start-deployment --service-arn <ServiceArn> --region "$AWS_REGION"
+aws apprunner start-deployment --service-arn "$APP_RUNNER_SERVICE_ARN" --region "$AWS_REGION"
 ```
 
 (Your ECR login expires after 12 hours — if the push fails on auth, re-run
@@ -323,9 +331,9 @@ steps 3-4 in one guided flow if you prefer not to script it.
 
 ## What this does *not* change
 
-- The `Dockerfile`, `backend/`, `data/`, and existing Docker/Render workflows
-  described in the [README](README.md) are untouched and still work exactly
-  as before — this is an additional hosting target, not a replacement, until
-  you actually repoint the frontend (step 8) and stop using the old one.
+- The `Dockerfile`, `backend/`, and `data/` workflows described in the
+  [README](README.md) are untouched and still work exactly as before for
+  local Docker use — this guide only adds where the container actually runs
+  in production.
 - The CLI tool (`vanderbilt_database_assistant.py`) runs locally and is
   unrelated to any of the above; nothing here affects it.
