@@ -443,6 +443,64 @@
       font-style: italic;
     }
 
+    /* ── Toolbar (export/print/full-text) ── */
+    #toolbar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      padding: 0.55rem 1.25rem;
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .toolbar-btn {
+      background: transparent;
+      color: var(--dark-gold);
+      border: 1px solid var(--border);
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .toolbar-btn:hover { border-color: var(--gold); background: var(--white); }
+
+    /* ── Find full text panel ── */
+    .fulltext-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100dvh;
+      width: min(360px, 92vw);
+      background: var(--white);
+      border-left: 1px solid var(--border);
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
+      z-index: 20;
+      padding: 1rem 1.1rem;
+      overflow-y: auto;
+    }
+    .fulltext-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.4rem;
+    }
+    .fulltext-panel-head h3 { font-size: 0.95rem; color: var(--black); }
+    .fulltext-panel p { font-size: 0.82rem; color: var(--muted); line-height: 1.4; margin-bottom: 0.7rem; }
+    .fulltext-input-row {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 0.8rem;
+    }
+    .fulltext-input-row input {
+      flex: 1;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.82rem;
+    }
+    .fulltext-link-row { margin-bottom: 0.45rem; }
+    .fulltext-link-row .action-btn { display: inline-block; }
+
     /* ── Typing indicator ── */
     .typing {
       display: flex;
@@ -546,6 +604,17 @@
       .bubble.user { max-width: 96%; }
       .card-head { align-items: flex-start; }
     }
+
+    /* ── Print ── */
+    @media print {
+      .sidebar, .sidebar-backdrop, .hamburger, #toolbar, #input-area, .fulltext-panel {
+        display: none !important;
+      }
+      body, .app, .main { background: #fff !important; }
+      header { border-bottom: 1px solid #000; }
+      .card, .bubble { break-inside: avoid; }
+      #messages { overflow: visible !important; }
+    }
   </style>
 </head>
 <body>
@@ -573,6 +642,13 @@
       </div>
     </header>
 
+    <div id="toolbar">
+      <button class="toolbar-btn" id="export-copy-btn" type="button">Copy as Markdown</button>
+      <button class="toolbar-btn" id="export-download-btn" type="button">Download .md</button>
+      <button class="toolbar-btn" id="export-print-btn" type="button">Print</button>
+      <button class="toolbar-btn" id="fulltext-open-btn" type="button">Find full text</button>
+    </div>
+
     <div id="messages"></div>
 
     <div id="input-area">
@@ -580,6 +656,19 @@
       <button id="send-btn" type="button">Send</button>
     </div>
   </div>
+
+  <aside class="fulltext-panel" id="fulltext-panel" hidden>
+    <div class="fulltext-panel-head">
+      <h3>Find full text</h3>
+      <button class="icon-btn" id="fulltext-close-btn" type="button" title="Close">&times;</button>
+    </div>
+    <p>Paste a DOI (e.g. 10.1000/xyz123) or a PubMed ID to get links to the full text.</p>
+    <div class="fulltext-input-row">
+      <input type="text" id="fulltext-input" placeholder="DOI or PMID" />
+      <button class="action-btn" id="fulltext-find-btn" type="button">Find</button>
+    </div>
+    <div id="fulltext-results"></div>
+  </aside>
 
 </div>
 
@@ -609,6 +698,16 @@
   const messagesEl   = document.getElementById("messages");
   const inputEl      = document.getElementById("user-input");
   const sendBtn      = document.getElementById("send-btn");
+
+  const exportCopyBtn     = document.getElementById("export-copy-btn");
+  const exportDownloadBtn = document.getElementById("export-download-btn");
+  const exportPrintBtn    = document.getElementById("export-print-btn");
+  const fulltextOpenBtn   = document.getElementById("fulltext-open-btn");
+  const fulltextCloseBtn  = document.getElementById("fulltext-close-btn");
+  const fulltextPanelEl   = document.getElementById("fulltext-panel");
+  const fulltextInputEl   = document.getElementById("fulltext-input");
+  const fulltextFindBtn   = document.getElementById("fulltext-find-btn");
+  const fulltextResultsEl = document.getElementById("fulltext-results");
 
   // ── Storage ────────────────────────────────────────────────────────────────
   function loadStore() {
@@ -978,6 +1077,134 @@
     scrollBottom();
   }
 
+  // ── Export / share / print ─────────────────────────────────────────────────
+  function chatToMarkdown(chat) {
+    const lines = [`# ${chat.title}`, ""];
+    for (const turn of chat.turns) {
+      if (turn.role === "user") {
+        lines.push(`**You:** ${turn.text}`, "");
+      } else if (turn.mode === "chat") {
+        lines.push(`**Assistant:** ${turn.text || ""}`, "");
+      } else {
+        const payload = turn.payload || {};
+        if (payload.enhanced_query) {
+          lines.push(`**Interpreted query:** ${payload.enhanced_query}`, "");
+        }
+        (payload.recommendations || []).forEach((rec, i) => {
+          lines.push(`${i + 1}. **${rec.name}**`);
+          if (rec.refined_description) lines.push(`   - ${rec.refined_description}`);
+          if (rec.why_it_fits)         lines.push(`   - Why it fits: ${rec.why_it_fits}`);
+          if (rec.search_string)       lines.push(`   - Search string: \`${rec.search_string}\``);
+          if (rec.direct_url)          lines.push(`   - Database: ${rec.direct_url}`);
+          if (rec.primo_search_url)    lines.push(`   - Search in Primo: ${rec.primo_search_url}`);
+          lines.push("");
+        });
+      }
+    }
+    lines.push("---", "Generated by the Vanderbilt Database Assistant.");
+    return lines.join("\n");
+  }
+
+  async function copyPlanAsMarkdown() {
+    const chat = activeChat();
+    if (!chat || chat.turns.length === 0) return;
+    const original = exportCopyBtn.textContent;
+    try {
+      await navigator.clipboard.writeText(chatToMarkdown(chat));
+      exportCopyBtn.textContent = "Copied!";
+    } catch {
+      exportCopyBtn.textContent = "Copy failed";
+    }
+    setTimeout(() => { exportCopyBtn.textContent = original; }, 1500);
+  }
+
+  function downloadPlanAsMarkdown() {
+    const chat = activeChat();
+    if (!chat || chat.turns.length === 0) return;
+    const blob = new Blob([chatToMarkdown(chat)], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(chat.title || "research-plan").replace(/[^\w\- ]/g, "").trim() || "research-plan"}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  exportCopyBtn.addEventListener("click", copyPlanAsMarkdown);
+  exportDownloadBtn.addEventListener("click", downloadPlanAsMarkdown);
+  exportPrintBtn.addEventListener("click", () => window.print());
+
+  // ── Find full text (DOI / PMID helper) ─────────────────────────────────────
+  // A Vanderbilt-specific LibKey/Third Iron library ID, if Vanderbilt Libraries
+  // has a Third Iron subscription -- ask library systems staff for this (a
+  // short numeric code) and set it here. Left null, the widget still works
+  // via the universal DOI resolver, PubMed, Primo, and Google Scholar links.
+  const VANDERBILT_LIBKEY_ID = null;
+
+  const PRIMO_BASE = "https://catalog.library.vanderbilt.edu/discovery/search?query=any,contains,{q}&tab=Everything&search_scope=MyInst_and_CI&vid=01VAN_INST:vanui";
+  function primoSearchUrl(q) {
+    return PRIMO_BASE.replace("{q}", encodeURIComponent(q));
+  }
+
+  function parseIdentifier(raw) {
+    const input = raw.trim();
+    const doiMatch = input.match(/10\.\d{4,9}\/\S+/);
+    if (doiMatch) return { type: "doi", value: doiMatch[0].replace(/[.,;)\]]+$/, "") };
+    const pmidMatch = input.match(/\b\d{5,9}\b/);
+    if (pmidMatch) return { type: "pmid", value: pmidMatch[0] };
+    return null;
+  }
+
+  function buildFullTextLinks(id) {
+    const links = [];
+    if (id.type === "doi") {
+      links.push({ label: "DOI resolver (publisher site)", href: `https://doi.org/${id.value}` });
+      if (VANDERBILT_LIBKEY_ID) {
+        links.push({ label: "LibKey (Vanderbilt full-text finder)", href: `https://libkey.io/libraries/${VANDERBILT_LIBKEY_ID}/doi/${id.value}` });
+      }
+      links.push({ label: "Search this DOI in Primo", href: primoSearchUrl(id.value) });
+      links.push({ label: "Search on Google Scholar", href: `https://scholar.google.com/scholar?q=${encodeURIComponent(id.value)}` });
+    } else {
+      links.push({ label: "View on PubMed", href: `https://pubmed.ncbi.nlm.nih.gov/${id.value}/` });
+      if (VANDERBILT_LIBKEY_ID) {
+        links.push({ label: "LibKey (Vanderbilt full-text finder)", href: `https://libkey.io/libraries/${VANDERBILT_LIBKEY_ID}/pmid/${id.value}` });
+      }
+      links.push({ label: "Search this PMID in Primo", href: primoSearchUrl(id.value) });
+    }
+    return links;
+  }
+
+  function renderFullTextResults() {
+    fulltextResultsEl.innerHTML = "";
+    const id = parseIdentifier(fulltextInputEl.value);
+    if (!id) {
+      fulltextResultsEl.appendChild(el("div", {
+        className: "error-banner",
+        text: "Couldn't recognize that as a DOI or PMID. A DOI looks like 10.1000/xyz123; a PMID is a number, usually 5-9 digits.",
+      }));
+      return;
+    }
+    for (const link of buildFullTextLinks(id)) {
+      const a = el("a", {
+        className: "action-btn secondary",
+        href: link.href,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        text: link.label,
+      });
+      fulltextResultsEl.appendChild(el("div", { className: "fulltext-link-row" }, a));
+    }
+  }
+
+  fulltextOpenBtn.addEventListener("click", () => { fulltextPanelEl.hidden = false; fulltextInputEl.focus(); });
+  fulltextCloseBtn.addEventListener("click", () => { fulltextPanelEl.hidden = true; });
+  fulltextFindBtn.addEventListener("click", renderFullTextResults);
+  fulltextInputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); renderFullTextResults(); }
+  });
+
   // ── Chat operations ────────────────────────────────────────────────────────
   function switchToChat(id) {
     if (store.active_id === id) return;
@@ -1056,41 +1283,88 @@
     scrollBottom();
 
     const typing = appendTyping();
+    let liveBubble = null; // created lazily on the first streamed delta
 
     try {
-      const res = await fetch(`${BACKEND_URL}/chat`, {
+      const res = await fetch(`${BACKEND_URL}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages(chat) }),
       });
 
-      typing.remove();
-
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const body = await res.text().catch(() => "");
         throw new Error(`Server returned ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
       }
 
-      const payload = await res.json();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let finalPayload = null;
+      let streamError = null;
 
-      if (payload.mode === "chat") {
-        const text = payload.text || "";
-        renderAssistantTextBubble(text);
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        let sepIdx;
+        while ((sepIdx = buf.indexOf("\n\n")) !== -1) {
+          const rawEvent = buf.slice(0, sepIdx).trim();
+          buf = buf.slice(sepIdx + 2);
+          if (!rawEvent.startsWith("data:")) continue;
+
+          let evt;
+          try {
+            evt = JSON.parse(rawEvent.slice(5).trim());
+          } catch {
+            continue; // ignore any malformed line rather than aborting the whole stream
+          }
+
+          if (evt.type === "delta") {
+            if (!liveBubble) {
+              typing.remove();
+              liveBubble = el("div", { className: "bubble assistant" });
+              messagesEl.appendChild(liveBubble);
+            }
+            liveBubble.textContent += evt.text;
+            scrollBottom();
+          } else if (evt.type === "final") {
+            finalPayload = evt;
+          } else if (evt.type === "error") {
+            streamError = evt.error || "Unknown error";
+          }
+        }
+      }
+
+      typing.remove();
+      if (streamError) throw new Error(streamError);
+      if (!finalPayload) throw new Error("No response received from the server.");
+
+      if (finalPayload.mode === "chat") {
+        const finalText = finalPayload.text || "";
+        if (liveBubble) {
+          liveBubble.textContent = finalText; // authoritative text wins over any partial-stream drift
+        } else {
+          renderAssistantTextBubble(finalText);
+        }
         chat.turns.push({
           role: "assistant",
           mode: "chat",
-          text,
-          raw_assistant_message: payload.raw_assistant_message,
+          text: finalText,
+          raw_assistant_message: finalPayload.raw_assistant_message,
         });
       } else {
-        renderResultSet(payload);
+        if (liveBubble) liveBubble.remove();
+        renderResultSet(finalPayload);
         chat.turns.push({
           role: "assistant",
           mode: "research",
-          payload,
-          raw_assistant_message: payload.raw_assistant_message,
+          payload: finalPayload,
+          raw_assistant_message: finalPayload.raw_assistant_message,
         });
       }
+
       scrollBottom();
       chat.updated_at = Date.now();
       saveStore();
@@ -1098,8 +1372,9 @@
 
     } catch (err) {
       typing.remove();
+      if (liveBubble) liveBubble.remove();
       appendError(`Something went wrong: ${err.message}. The server may be waking up from sleep — please wait a moment and try again.`);
-      // Roll back the optimistic user turn since we got no response.
+      // Roll back the optimistic user turn since we got no usable response.
       chat.turns.pop();
       if (firstMessage) chat.title = "New chat";
       saveStore();

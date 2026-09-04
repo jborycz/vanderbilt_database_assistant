@@ -1,11 +1,14 @@
 import json
 import re
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from urllib.parse import quote_plus
 
 import anthropic
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 PRIMO_SEARCH_URL = (
@@ -112,6 +115,92 @@ Universal rules
 """
 
 
+# ── Rate limiting ────────────────────────────────────────────────────────────
+# In-memory per-IP sliding window. Fine for a single instance (App Runner runs
+# one uvicorn worker here); would need a shared store (e.g. Redis) if this is
+# ever scaled to multiple instances behind the load balancer.
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_MAX_REQUESTS = 12
+
+_request_log: dict[str, deque] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP. App Runner sits behind a proxy, so prefer
+    X-Forwarded-For (its first entry is the original client) when present."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Return True if this request is allowed, False if the client has
+    exceeded RATE_LIMIT_MAX_REQUESTS within the last RATE_LIMIT_WINDOW_SECONDS."""
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    log = _request_log[client_ip]
+    while log and log[0] < window_start:
+        log.popleft()
+    if len(log) >= RATE_LIMIT_MAX_REQUESTS:
+        return False
+    log.append(now)
+    return True
+
+
+# ── Pre-model abuse / off-topic screening ────────────────────────────────────
+# Catches the most obvious prompt-injection and "do my homework for me"
+# requests before spending a model call on them. This is a coarse net, not a
+# security boundary -- the system prompt's own rules are the real defense --
+# but it's free to run and avoids paying for a Claude call on clear-cut cases.
+_INJECTION_PATTERNS = [
+    re.compile(r"\bignore (all |any |the )?(previous|prior|above|earlier) instructions\b", re.I),
+    re.compile(r"\bdisregard (all |any |the )?(previous|prior|above|earlier)\b", re.I),
+    re.compile(r"\b(reveal|show|print|repeat) (your |the )?(system prompt|instructions)\b", re.I),
+    re.compile(r"\bwhat (are|is) your (system )?(prompt|instructions)\b", re.I),
+    re.compile(r"\byou are now\b.{0,30}\b(dan|jailbroken|unrestricted|no rules)\b", re.I),
+    re.compile(r"\bact as (if you (were|are) )?an? (unrestricted|jailbroken)\b", re.I),
+]
+
+_HOMEWORK_PATTERNS = [
+    re.compile(r"\bwrite (my|me an?|a full|a complete)\b.{0,20}\b(essay|paper|assignment|thesis)\b", re.I),
+    re.compile(r"\bdo my (homework|assignment|essay|paper)\b", re.I),
+    re.compile(r"\b(give|send|email) me the (full|entire|complete) (text|pdf|article)\b", re.I),
+    re.compile(r"\bcomplete my (assignment|paper|essay|thesis)\b", re.I),
+]
+
+_SCREEN_INJECTION_MESSAGE = (
+    "I'm built specifically to recommend Vanderbilt Libraries databases for research topics, "
+    "and I can't share internal instructions or take on a different role. Tell me what you're "
+    "researching and I'll suggest relevant databases."
+)
+
+_SCREEN_HOMEWORK_MESSAGE = (
+    "I help you find databases to research a topic -- I don't write papers, complete assignments, "
+    "or provide full-text copies of articles. Tell me your research topic and I'll point you to "
+    "databases where you can find and read the sources yourself."
+)
+
+
+def _screen_message(text: str) -> str | None:
+    """Return a canned redirect if `text` matches an obvious abuse pattern, else None."""
+    for pat in _INJECTION_PATTERNS:
+        if pat.search(text):
+            return _SCREEN_INJECTION_MESSAGE
+    for pat in _HOMEWORK_PATTERNS:
+        if pat.search(text):
+            return _SCREEN_HOMEWORK_MESSAGE
+    return None
+
+
+def _last_user_text(messages: list[dict]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            content = m.get("content", "")
+            return content if isinstance(content, str) else ""
+    return ""
+
+
 def _load_catalog() -> tuple[str, dict[str, dict]]:
     """Load the newest databases_YYYYMMDD.jsonl file.
 
@@ -184,6 +273,51 @@ def _parse_json_response(text: str) -> dict:
         return json.loads(match.group(0))
 
 
+def _extract_partial_field(buf: str, field: str) -> str | None:
+    """Best-effort extraction of a top-level string field's value from a
+    possibly-incomplete JSON object, for a live "typing" preview while
+    streaming. Returns the decoded text read so far, or None if the field
+    hasn't started yet. This is only ever used for the live preview -- the
+    authoritative value always comes from parsing the complete JSON once the
+    stream ends, so any drift here just gets corrected at the end, never
+    shown as final."""
+    marker = f'"{field}"'
+    idx = buf.find(marker)
+    if idx == -1:
+        return None
+    i = idx + len(marker)
+    while i < len(buf) and buf[i] in " \t\n\r:":
+        i += 1
+    if i >= len(buf) or buf[i] != '"':
+        return None
+    i += 1
+    out: list[str] = []
+    simple_escapes = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
+    while i < len(buf):
+        c = buf[i]
+        if c == "\\":
+            if i + 1 >= len(buf):
+                break  # incomplete escape sequence -- wait for more data
+            nc = buf[i + 1]
+            if nc in simple_escapes:
+                out.append(simple_escapes[nc])
+                i += 2
+                continue
+            if nc == "u" and i + 6 <= len(buf):
+                try:
+                    out.append(chr(int(buf[i + 2:i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    break
+            break  # unknown/incomplete escape -- stop here
+        if c == '"':
+            break  # field value is complete
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _enrich(rec: dict, by_name: dict[str, dict]) -> dict:
     """Attach direct_url and primo_search_url to a recommendation."""
     record = _lookup(rec.get("name", ""), by_name)
@@ -241,37 +375,9 @@ def _call_llm(messages: list[dict], max_tokens: int = 1500) -> tuple[dict, str]:
     return parsed, text
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "catalog_size": len(_by_name)}
-
-
-@app.post("/chat")
-def chat(req: ChatRequest):
-    try:
-        parsed, raw_text = _call_llm(req.messages)
-    except anthropic.APIError as exc:
-        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}") from exc
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Model returned invalid JSON: {exc}",
-        ) from exc
-
-    # Fall back to research mode when the model omits a mode field (for
-    # backward-compat with any pre-mode responses in history).
-    mode = parsed.get("mode") or ("research" if "recommendations" in parsed else "chat")
-
-    if mode == "chat":
-        text = parsed.get("text", "").strip()
-        synthesized = json.dumps({"mode": "chat", "text": text})
-        return {
-            "mode": "chat",
-            "text": text,
-            "raw_assistant_message": synthesized,
-        }
-
-    # Research mode.
+def _finish_research_mode(parsed: dict, raw_text: str, messages: list[dict]) -> dict:
+    """Shared enrichment/verification/retry pipeline for research-mode
+    responses, used by both the buffered and streaming endpoints."""
     enhanced_query = parsed.get("enhanced_query", "")
     initial = [_enrich(r, _by_name) for r in parsed.get("recommendations", [])]
     matched = [r for r in initial if r["matched"]]
@@ -292,7 +398,7 @@ def chat(req: ChatRequest):
             f"{exclude_clause} Same research schema; the `recommendations` array "
             f"must have exactly {needed} items."
         )
-        followup_messages = list(req.messages) + [
+        followup_messages = list(messages) + [
             {"role": "assistant", "content": raw_text},
             {"role": "user", "content": followup_msg},
         ]
@@ -337,3 +443,124 @@ def chat(req: ChatRequest):
         "recommendations": final,
         "raw_assistant_message": synthesized,
     }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "catalog_size": len(_by_name)}
+
+
+@app.post("/chat")
+def chat(req: ChatRequest, request: Request):
+    if not _check_rate_limit(_client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait a moment and try again.")
+
+    screened = _screen_message(_last_user_text(req.messages))
+    if screened:
+        synthesized = json.dumps({"mode": "chat", "text": screened})
+        return {"mode": "chat", "text": screened, "raw_assistant_message": synthesized}
+
+    try:
+        parsed, raw_text = _call_llm(req.messages)
+    except anthropic.APIError as exc:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}") from exc
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model returned invalid JSON: {exc}",
+        ) from exc
+
+    # Fall back to research mode when the model omits a mode field (for
+    # backward-compat with any pre-mode responses in history).
+    mode = parsed.get("mode") or ("research" if "recommendations" in parsed else "chat")
+
+    if mode == "chat":
+        text = parsed.get("text", "").strip()
+        synthesized = json.dumps({"mode": "chat", "text": text})
+        return {
+            "mode": "chat",
+            "text": text,
+            "raw_assistant_message": synthesized,
+        }
+
+    return _finish_research_mode(parsed, raw_text, req.messages)
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest, request: Request):
+    """Streaming counterpart to /chat. Emits newline-delimited SSE events:
+      {"type": "delta", "text": "..."}   -- incremental text (chat mode only)
+      {"type": "final", ...}             -- the same shape /chat returns
+      {"type": "error", "error": "..."}  -- something went wrong
+
+    Research-mode responses never stream token-by-token -- there is no
+    top-level "text" field to preview, and the recommendations only become
+    trustworthy after the same catalog-verification/retry pass /chat uses, so
+    they are only ever delivered as one "final" event, same as before. Only
+    chat-mode replies get the live "typing" effect.
+    """
+    client_ip = _client_ip(request)
+
+    def single_event(data: dict):
+        yield _sse(data)
+
+    if not _check_rate_limit(client_ip):
+        return StreamingResponse(
+            single_event({"type": "error", "error": "Too many requests. Please wait a moment and try again."}),
+            media_type="text/event-stream",
+        )
+
+    screened = _screen_message(_last_user_text(req.messages))
+    if screened:
+        synthesized = json.dumps({"mode": "chat", "text": screened})
+        return StreamingResponse(
+            single_event({
+                "type": "final", "mode": "chat", "text": screened,
+                "raw_assistant_message": synthesized,
+            }),
+            media_type="text/event-stream",
+        )
+
+    def generate():
+        full_text = ""
+        sent_len = 0
+        try:
+            with _client.messages.stream(
+                model="claude-opus-4-7",
+                max_tokens=1500,
+                system=_system,
+                messages=req.messages,
+            ) as stream:
+                for delta in stream.text_stream:
+                    full_text += delta
+                    extracted = _extract_partial_field(full_text, "text")
+                    if extracted is not None and len(extracted) > sent_len:
+                        chunk = extracted[sent_len:]
+                        sent_len = len(extracted)
+                        yield _sse({"type": "delta", "text": chunk})
+        except anthropic.APIError as exc:
+            yield _sse({"type": "error", "error": f"Claude API error: {exc}"})
+            return
+
+        try:
+            parsed = _parse_json_response(full_text)
+        except (json.JSONDecodeError, ValueError) as exc:
+            yield _sse({"type": "error", "error": f"Model returned invalid JSON: {exc}"})
+            return
+
+        mode = parsed.get("mode") or ("research" if "recommendations" in parsed else "chat")
+
+        if mode == "chat":
+            text = parsed.get("text", "").strip()
+            synthesized = json.dumps({"mode": "chat", "text": text})
+            yield _sse({"type": "final", "mode": "chat", "text": text, "raw_assistant_message": synthesized})
+            return
+
+        result = _finish_research_mode(parsed, full_text, req.messages)
+        yield _sse({"type": "final", **result})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
