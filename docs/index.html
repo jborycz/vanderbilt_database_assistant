@@ -464,42 +464,34 @@
     }
     .toolbar-btn:hover { border-color: var(--gold); background: var(--white); }
 
-    /* ── Find full text panel ── */
-    .fulltext-panel {
-      position: fixed;
-      top: 0;
-      right: 0;
-      height: 100dvh;
-      width: min(360px, 92vw);
+    /* ── Export menu ── */
+    .export-menu { position: relative; }
+    .export-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      min-width: 190px;
       background: var(--white);
-      border-left: 1px solid var(--border);
-      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
-      z-index: 20;
-      padding: 1rem 1.1rem;
-      overflow-y: auto;
-    }
-    .fulltext-panel-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 0.4rem;
-    }
-    .fulltext-panel-head h3 { font-size: 0.95rem; color: var(--black); }
-    .fulltext-panel p { font-size: 0.82rem; color: var(--muted); line-height: 1.4; margin-bottom: 0.7rem; }
-    .fulltext-input-row {
-      display: flex;
-      gap: 0.4rem;
-      margin-bottom: 0.8rem;
-    }
-    .fulltext-input-row input {
-      flex: 1;
-      padding: 0.4rem 0.55rem;
       border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+      padding: 0.25rem;
+      z-index: 30;
+    }
+    .export-dropdown button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      padding: 0.45rem 0.6rem;
       border-radius: 6px;
       font-size: 0.82rem;
+      color: var(--black);
+      cursor: pointer;
     }
-    .fulltext-link-row { margin-bottom: 0.45rem; }
-    .fulltext-link-row .action-btn { display: inline-block; }
+    .export-dropdown button:hover,
+    .export-dropdown button:focus-visible { background: var(--bg); outline: none; }
 
     /* ── Typing indicator ── */
     .typing {
@@ -607,7 +599,7 @@
 
     /* ── Print ── */
     @media print {
-      .sidebar, .sidebar-backdrop, .hamburger, #toolbar, #input-area, .fulltext-panel {
+      .sidebar, .sidebar-backdrop, .hamburger, #toolbar, #input-area {
         display: none !important;
       }
       body, .app, .main { background: #fff !important; }
@@ -643,10 +635,14 @@
     </header>
 
     <div id="toolbar">
-      <button class="toolbar-btn" id="export-copy-btn" type="button">Copy as Markdown</button>
-      <button class="toolbar-btn" id="export-download-btn" type="button">Download .md</button>
-      <button class="toolbar-btn" id="export-print-btn" type="button">Print</button>
-      <button class="toolbar-btn" id="fulltext-open-btn" type="button">Find full text</button>
+      <div class="export-menu" id="export-menu">
+        <button class="toolbar-btn" id="export-btn" type="button" aria-haspopup="menu" aria-expanded="false">Export ▾</button>
+        <div class="export-dropdown" id="export-dropdown" role="menu" hidden>
+          <button id="export-copy-btn" type="button" role="menuitem">Copy as Markdown</button>
+          <button id="export-download-btn" type="button" role="menuitem">Download .md</button>
+          <button id="export-print-btn" type="button" role="menuitem">Print</button>
+        </div>
+      </div>
     </div>
 
     <div id="messages"></div>
@@ -656,19 +652,6 @@
       <button id="send-btn" type="button">Send</button>
     </div>
   </div>
-
-  <aside class="fulltext-panel" id="fulltext-panel" hidden>
-    <div class="fulltext-panel-head">
-      <h3>Find full text</h3>
-      <button class="icon-btn" id="fulltext-close-btn" type="button" title="Close">&times;</button>
-    </div>
-    <p>Paste a DOI (e.g. 10.1000/xyz123) or a PubMed ID to get links to the full text.</p>
-    <div class="fulltext-input-row">
-      <input type="text" id="fulltext-input" placeholder="DOI or PMID" />
-      <button class="action-btn" id="fulltext-find-btn" type="button">Find</button>
-    </div>
-    <div id="fulltext-results"></div>
-  </aside>
 
 </div>
 
@@ -699,15 +682,12 @@
   const inputEl      = document.getElementById("user-input");
   const sendBtn      = document.getElementById("send-btn");
 
+  const exportMenuEl      = document.getElementById("export-menu");
+  const exportBtn         = document.getElementById("export-btn");
+  const exportDropdownEl  = document.getElementById("export-dropdown");
   const exportCopyBtn     = document.getElementById("export-copy-btn");
   const exportDownloadBtn = document.getElementById("export-download-btn");
   const exportPrintBtn    = document.getElementById("export-print-btn");
-  const fulltextOpenBtn   = document.getElementById("fulltext-open-btn");
-  const fulltextCloseBtn  = document.getElementById("fulltext-close-btn");
-  const fulltextPanelEl   = document.getElementById("fulltext-panel");
-  const fulltextInputEl   = document.getElementById("fulltext-input");
-  const fulltextFindBtn   = document.getElementById("fulltext-find-btn");
-  const fulltextResultsEl = document.getElementById("fulltext-results");
 
   // ── Storage ────────────────────────────────────────────────────────────────
   function loadStore() {
@@ -1105,17 +1085,22 @@
     return lines.join("\n");
   }
 
+  function setExportMenu(open) {
+    exportDropdownEl.hidden = !open;
+    exportBtn.setAttribute("aria-expanded", String(open));
+  }
+
   async function copyPlanAsMarkdown() {
     const chat = activeChat();
     if (!chat || chat.turns.length === 0) return;
-    const original = exportCopyBtn.textContent;
+    const original = "Export ▾";
     try {
       await navigator.clipboard.writeText(chatToMarkdown(chat));
-      exportCopyBtn.textContent = "Copied!";
+      exportBtn.textContent = "Copied!";
     } catch {
-      exportCopyBtn.textContent = "Copy failed";
+      exportBtn.textContent = "Copy failed";
     }
-    setTimeout(() => { exportCopyBtn.textContent = original; }, 1500);
+    setTimeout(() => { exportBtn.textContent = original; }, 1500);
   }
 
   function downloadPlanAsMarkdown() {
@@ -1132,77 +1117,18 @@
     URL.revokeObjectURL(url);
   }
 
-  exportCopyBtn.addEventListener("click", copyPlanAsMarkdown);
-  exportDownloadBtn.addEventListener("click", downloadPlanAsMarkdown);
-  exportPrintBtn.addEventListener("click", () => window.print());
-
-  // ── Find full text (DOI / PMID helper) ─────────────────────────────────────
-  // A Vanderbilt-specific LibKey/Third Iron library ID, if Vanderbilt Libraries
-  // has a Third Iron subscription -- ask library systems staff for this (a
-  // short numeric code) and set it here. Left null, the widget still works
-  // via the universal DOI resolver, PubMed, Primo, and Google Scholar links.
-  const VANDERBILT_LIBKEY_ID = null;
-
-  const PRIMO_BASE = "https://catalog.library.vanderbilt.edu/discovery/search?query=any,contains,{q}&tab=Everything&search_scope=MyInst_and_CI&vid=01VAN_INST:vanui";
-  function primoSearchUrl(q) {
-    return PRIMO_BASE.replace("{q}", encodeURIComponent(q));
-  }
-
-  function parseIdentifier(raw) {
-    const input = raw.trim();
-    const doiMatch = input.match(/10\.\d{4,9}\/\S+/);
-    if (doiMatch) return { type: "doi", value: doiMatch[0].replace(/[.,;)\]]+$/, "") };
-    const pmidMatch = input.match(/\b\d{5,9}\b/);
-    if (pmidMatch) return { type: "pmid", value: pmidMatch[0] };
-    return null;
-  }
-
-  function buildFullTextLinks(id) {
-    const links = [];
-    if (id.type === "doi") {
-      links.push({ label: "DOI resolver (publisher site)", href: `https://doi.org/${id.value}` });
-      if (VANDERBILT_LIBKEY_ID) {
-        links.push({ label: "LibKey (Vanderbilt full-text finder)", href: `https://libkey.io/libraries/${VANDERBILT_LIBKEY_ID}/doi/${id.value}` });
-      }
-      links.push({ label: "Search this DOI in Primo", href: primoSearchUrl(id.value) });
-      links.push({ label: "Search on Google Scholar", href: `https://scholar.google.com/scholar?q=${encodeURIComponent(id.value)}` });
-    } else {
-      links.push({ label: "View on PubMed", href: `https://pubmed.ncbi.nlm.nih.gov/${id.value}/` });
-      if (VANDERBILT_LIBKEY_ID) {
-        links.push({ label: "LibKey (Vanderbilt full-text finder)", href: `https://libkey.io/libraries/${VANDERBILT_LIBKEY_ID}/pmid/${id.value}` });
-      }
-      links.push({ label: "Search this PMID in Primo", href: primoSearchUrl(id.value) });
-    }
-    return links;
-  }
-
-  function renderFullTextResults() {
-    fulltextResultsEl.innerHTML = "";
-    const id = parseIdentifier(fulltextInputEl.value);
-    if (!id) {
-      fulltextResultsEl.appendChild(el("div", {
-        className: "error-banner",
-        text: "Couldn't recognize that as a DOI or PMID. A DOI looks like 10.1000/xyz123; a PMID is a number, usually 5-9 digits.",
-      }));
-      return;
-    }
-    for (const link of buildFullTextLinks(id)) {
-      const a = el("a", {
-        className: "action-btn secondary",
-        href: link.href,
-        target: "_blank",
-        rel: "noopener noreferrer",
-        text: link.label,
-      });
-      fulltextResultsEl.appendChild(el("div", { className: "fulltext-link-row" }, a));
-    }
-  }
-
-  fulltextOpenBtn.addEventListener("click", () => { fulltextPanelEl.hidden = false; fulltextInputEl.focus(); });
-  fulltextCloseBtn.addEventListener("click", () => { fulltextPanelEl.hidden = true; });
-  fulltextFindBtn.addEventListener("click", renderFullTextResults);
-  fulltextInputEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); renderFullTextResults(); }
+  exportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setExportMenu(exportDropdownEl.hidden);
+  });
+  exportCopyBtn.addEventListener("click", () => { setExportMenu(false); copyPlanAsMarkdown(); });
+  exportDownloadBtn.addEventListener("click", () => { setExportMenu(false); downloadPlanAsMarkdown(); });
+  exportPrintBtn.addEventListener("click", () => { setExportMenu(false); window.print(); });
+  document.addEventListener("click", (e) => {
+    if (!exportMenuEl.contains(e.target)) setExportMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !exportDropdownEl.hidden) { setExportMenu(false); exportBtn.focus(); }
   });
 
   // ── Chat operations ────────────────────────────────────────────────────────
