@@ -5,10 +5,22 @@
 # service). Run this any time backend/, data/, or the Dockerfile change.
 #
 # Usage:
-#   ./redeploy.sh
+#   ./redeploy.sh                 # rebuild and redeploy
+#   ./redeploy.sh --refresh-data  # first refresh the A-Z catalog, librarian
+#                                 # roster and journal data (~4 minutes), then
+#                                 # deploy. Commit the new files in data/ after.
 
 set -euo pipefail
 cd "$(dirname "$0")"
+
+REFRESH_DATA=0
+for arg in "$@"; do
+  case "$arg" in
+    --refresh-data) REFRESH_DATA=1 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    *) echo "Unknown option: $arg (try --help)" >&2; exit 1 ;;
+  esac
+done
 
 echo "== Loading AWS deploy environment =="
 source ./deploy-env.sh
@@ -18,6 +30,13 @@ source ./deploy-env.sh
 if ! docker info > /dev/null 2>&1; then
   echo "Error: Docker daemon isn't running. Start Docker Desktop and try again." >&2
   exit 1
+fi
+
+if [ "$REFRESH_DATA" = 1 ]; then
+  echo
+  echo "== Refreshing data (databases, librarians, journals) =="
+  python3 refresh_data.py
+  echo "New snapshots are in data/ - remember to commit them."
 fi
 
 IMAGE_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:latest"

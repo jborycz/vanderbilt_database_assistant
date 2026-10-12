@@ -13,6 +13,55 @@ A conversational AI assistant that recommends Vanderbilt Libraries databases bas
 
 The catalog is automatically refreshed from the LibApps API if the local copy is more than 7 days old.
 
+## The web app
+
+The hosted app (`docs/` frontend + `backend/` API) has two assistants, each with
+its own saved chats in the sidebar:
+
+- **Vanderbilt Database Assistant** — recommends five Vanderbilt databases with
+  ready-to-paste search strings and ends each result with an **Ask a Librarian**
+  card (subject librarians matched to the topic: title, email, phone, office).
+- **Open Access Assistant** — matches a manuscript topic, or a journal you'd like
+  something similar to, with journals that have a current Vanderbilt open-access
+  publisher agreement. Cards show scope fit, SJR quartile and other impact
+  metrics, the fee waiver or discount and the resulting price, and link to the
+  [Open Journal Finder](https://vanderbilt.openjournalfinder.com) and the
+  [Vanderbilt Open Author Services guide](https://researchguides.library.vanderbilt.edu/AuthorServices/vuoaagreements).
+  Acceptance rates and Clarivate impact factors are not in the source data.
+
+An **Export** menu copies, downloads or prints the current chat.
+
+### Run it locally
+
+```bash
+export ANTHROPIC_API_KEY=<your real key>
+./run-local.sh            # then open http://localhost:8123  (--open does it for you)
+```
+
+The first run creates a private `.venv` and installs dependencies. Ctrl+C stops
+both servers. Background data refresh is off locally (`DATA_REFRESH=1` turns it on).
+
+### Reference data and how it stays fresh
+
+| Data | Source | Snapshot in `data/` |
+|---|---|---|
+| Database catalog | Springshare LibApps API | `databases_YYYYMMDD.jsonl` |
+| Librarian roster | library.vanderbilt.edu/staff (scraped) | `staff_YYYYMMDD.json` (+ `staff_overrides.json` for hand edits) |
+| Open-access journals | Open Journal Finder public API | `journals_YYYYMMDD.json.gz` |
+
+`python3 refresh_data.py [databases|staff|journals]` rebuilds the snapshots
+(databases needs `SPRINGSHARE_CLIENT_ID`/`SPRINGSHARE_CLIENT_SECRET` in the
+environment or a `.env` file; journals take about 3 minutes). `./redeploy.sh
+--refresh-data` does that and deploys in one step.
+
+The hosted backend also refreshes itself: a background thread checks every 6 hours
+and re-fetches any source older than 14 days (`DATA_MAX_AGE_DAYS`,
+`DATA_CHECK_INTERVAL_HOURS`; `DATA_REFRESH=0` disables it). New data is swapped in
+only after a sanity check, failures back off and keep the old data, and `/health`
+reports each source's date. The databases source needs the Springshare credentials
+in the container's environment (see AWS_DEPLOYMENT.md). Refreshed data lives in
+memory only, so it is lost on restart; ship fresh snapshots in the image too.
+
 ## Requirements
 
 - Python 3.12+
@@ -142,6 +191,7 @@ done, redeploying after a code change is one command:
 
 This rebuilds the image, pushes it to ECR, and tells App Runner to redeploy —
 see the script for the individual steps if you'd rather run them by hand.
+`./redeploy.sh --refresh-data` refreshes the reference data first.
 
 ## Project structure
 
@@ -149,9 +199,14 @@ see the script for the individual steps if you'd rather run them by hand.
 vanderbilt_database_assistant.py   # main assistant (run this)
 weekly_update.py                   # fetch a fresh catalog from the LibApps API
 api_get_json_clean.py              # LibApps API client and data cleaning helpers
+backend/                           # FastAPI app: main.py, oa.py (Open Access Assistant),
+                                   #   journals.py, staff.py, catalog.py, refresher.py
+docs/index.html                    # the web page (GitHub Pages)
+run-local.sh                       # run backend + web page locally
+refresh_data.py                    # rebuild the dated snapshots in data/
 redeploy.sh                        # rebuild + push + redeploy the backend to AWS
 deploy-env.sh                      # AWS shell variables for redeploy.sh (gitignored)
 requirements.txt                   # Python dependencies
-data/                              # catalog snapshots (JSONL, dated)
+data/                              # dated snapshots: catalog, librarian roster, journals
 outputs/                           # saved session transcripts
 ```

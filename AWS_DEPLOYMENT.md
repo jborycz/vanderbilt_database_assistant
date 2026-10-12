@@ -296,6 +296,33 @@ aws apprunner start-deployment --service-arn "$APP_RUNNER_SERVICE_ARN" --region 
 (Your ECR login expires after 12 hours — if the push fails on auth, re-run
 the `aws ecr get-login-password | docker login ...` command from step 2.)
 
+`./redeploy.sh --refresh-data` first rebuilds the dated snapshots in `data/`
+(A-Z catalog, librarian roster, open-access journals; about 4 minutes) so the
+new image ships current data. Commit the new files afterward.
+
+### 10. Optional: let the running service refresh its own catalog
+
+The backend refreshes its librarian roster and journal data on its own with no
+extra setup. The A-Z database catalog also needs Springshare credentials inside
+the container. Store them as secrets, allow the instance role to read them, and
+add them to the service's runtime secrets:
+
+```bash
+aws secretsmanager create-secret --name vanderbilt-db-assistant/springshare-client-id --secret-string "<id>"
+aws secretsmanager create-secret --name vanderbilt-db-assistant/springshare-client-secret --secret-string "<secret>"
+```
+
+Add both secret ARNs (including the random suffix each returns) to the
+`SecretsAccess` policy on `AppRunnerInstanceRole`, then `update-service` with
+`SPRINGSHARE_CLIENT_ID` and `SPRINGSHARE_CLIENT_SECRET` added next to
+`ANTHROPIC_API_KEY` under `RuntimeEnvironmentSecrets`. Without them the catalog
+only updates when you redeploy with fresh data.
+
+**Memory:** the journal index makes the backend use about 210 MB at rest and
+about 280 MB while swapping in refreshed data. That fits the 0.5 GB size but
+with less headroom; if you see restarts, `update-service` the instance to
+1 GB (0.25 vCPU supports 0.5 or 1 GB), which costs only a few dollars a month.
+
 ---
 
 ## Option B: ECS Fargate (more control, more setup)

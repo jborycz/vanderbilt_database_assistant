@@ -150,8 +150,12 @@ def _salvage_picks(raw: str) -> list[dict]:
 class OpenAccessAssistant:
     def __init__(self, client: anthropic.Anthropic, index: journals.JournalIndex):
         self.client = client
-        self.index = index
+        self.set_index(index)
+
+    def set_index(self, index: journals.JournalIndex) -> None:
+        """Swap in a (re)built journal index; used by the background refresh."""
         self._intent_system = INTENT_SYSTEM + "\nALLOWED SUBJECTS: " + "; ".join(index.subject_terms)
+        self.index = index
 
     def _raw(self, model: str, system: str, messages: list[dict], max_tokens: int) -> str:
         resp = self.client.messages.create(

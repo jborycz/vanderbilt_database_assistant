@@ -19,3 +19,4 @@ requirements.txt
 api_get_json_clean.py
 vanderbilt_database_assistant.py
 weekly_update.py
+data/*.csv

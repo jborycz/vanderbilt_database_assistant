@@ -2,6 +2,8 @@ import json
 import re
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -11,8 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import journals, staff
+from backend import catalog, journals, staff
 from backend.oa import OpenAccessAssistant
+from backend.refresher import Refresher, Source
 
 PRIMO_SEARCH_URL = (
     "https://catalog.library.vanderbilt.edu/discovery/search"
@@ -229,25 +232,21 @@ def _last_user_text(messages: list[dict]) -> str:
     return ""
 
 
-def _load_catalog() -> tuple[str, dict[str, dict]]:
-    """Load the newest databases_YYYYMMDD.jsonl file.
+def _file_date(path: Path) -> date | None:
+    m = re.search(r"_(\d{4})(\d{2})(\d{2})\.", path.name)
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+    except ValueError:
+        return None
+
+
+def _build_catalog(raw: list[dict]) -> tuple[str, dict[str, dict]]:
+    """Format raw A-Z records for the prompt and build the name lookup.
 
     Returns:
         catalog_text: formatted text block for the Claude system prompt.
-        by_name: case-insensitive name → record lookup for URL enrichment.
+        by_name: case-insensitive name -> record lookup for URL enrichment.
     """
-    data_dir = Path(__file__).resolve().parent.parent / "data"
-    candidates = sorted(data_dir.glob("databases_????????.jsonl"), reverse=True)
-    if not candidates:
-        raise FileNotFoundError("No database catalog found in data/. Run weekly_update.py first.")
-
-    raw: list[dict] = []
-    with open(candidates[0], encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                raw.append(json.loads(line))
-
     visible = [
         d for d in raw
         if d.get("enable_hidden") != "1" and d.get("description", "").strip()
@@ -266,6 +265,24 @@ def _load_catalog() -> tuple[str, dict[str, dict]]:
         lines.append("")
 
     return "\n".join(lines), by_name
+
+
+def _load_catalog() -> tuple[str, dict[str, dict], int, date | None]:
+    """Load the newest databases_YYYYMMDD.jsonl file baked into the image."""
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    candidates = sorted(data_dir.glob("databases_????????.jsonl"), reverse=True)
+    if not candidates:
+        raise FileNotFoundError("No database catalog found in data/. Run weekly_update.py first.")
+
+    raw: list[dict] = []
+    with open(candidates[0], encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                raw.append(json.loads(line))
+
+    text, by_name = _build_catalog(raw)
+    return text, by_name, len(raw), _file_date(candidates[0])
 
 
 def _lookup(name: str, by_name: dict[str, dict]) -> dict | None:
@@ -366,7 +383,14 @@ def _enrich(rec: dict, by_name: dict[str, dict]) -> dict:
     return enriched
 
 
-app = FastAPI(title="Vanderbilt Database Recommender API")
+@asynccontextmanager
+async def _lifespan(_app):
+    _refresher.start()
+    yield
+    _refresher.stop()
+
+
+app = FastAPI(title="Vanderbilt Database Recommender API", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -376,24 +400,82 @@ app.add_middleware(
 )
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_catalog_text, _by_name = _load_catalog()
+_catalog_text, _by_name, _catalog_total, _catalog_date = _load_catalog()
 _staff_path = staff.latest_snapshot(_DATA_DIR)
+_staff_date = _file_date(_staff_path) if _staff_path else None
 _staff = staff.load_snapshot(_staff_path) if _staff_path else []
 _staff_by_id = {p["id"]: p for p in _staff}
 _client = anthropic.Anthropic()
 _journals_path = journals.latest_snapshot(_DATA_DIR)
+_journals_date = _file_date(_journals_path) if _journals_path else None
 _oa = (
     OpenAccessAssistant(_client, journals.JournalIndex(journals.load_snapshot(_journals_path)))
     if _journals_path else None
 )
-_system = [
-    {"type": "text", "text": SYSTEM_PROMPT},
-    {"type": "text", "text": _catalog_text, "cache_control": {"type": "ephemeral"}},
-]
-if _staff:
-    _system.append(
-        {"type": "text", "text": staff.format_roster(_staff), "cache_control": {"type": "ephemeral"}}
-    )
+
+
+def _build_system() -> list[dict]:
+    blocks = [
+        {"type": "text", "text": SYSTEM_PROMPT},
+        {"type": "text", "text": _catalog_text, "cache_control": {"type": "ephemeral"}},
+    ]
+    if _staff:
+        blocks.append(
+            {"type": "text", "text": staff.format_roster(_staff), "cache_control": {"type": "ephemeral"}}
+        )
+    return blocks
+
+
+_system = _build_system()
+
+
+# ── Background data refresh ──────────────────────────────────────────────────
+# Each apply function swaps in already-fetched, already-validated data in one
+# step; requests in flight keep using whatever they already read.
+
+def _apply_catalog(raw: list[dict]) -> None:
+    global _catalog_text, _by_name, _catalog_total, _system
+    text, by_name = _build_catalog(raw)
+    _catalog_text, _by_name, _catalog_total = text, by_name, len(raw)
+    _system = _build_system()
+
+
+def _apply_staff(people: list[dict]) -> None:
+    global _staff, _staff_by_id, _system
+    _staff, _staff_by_id = people, {p["id"]: p for p in people}
+    _system = _build_system()
+
+
+def _apply_journals(items: list[dict]) -> None:
+    if _oa is not None:
+        _oa.set_index(journals.JournalIndex(items))
+
+
+def _fetch_staff() -> list[dict]:
+    return staff.fetch_staff(overrides=staff.load_overrides(_DATA_DIR))
+
+
+_refresher = Refresher([
+    Source(
+        "databases", _catalog_date, catalog.fetch_databases,
+        validate=lambda new: len(new) > 100 and len(new) >= 0.8 * _catalog_total,
+        apply=_apply_catalog,
+        enabled=catalog.credentials_available(),
+        disabled_reason="SPRINGSHARE_CLIENT_ID / SPRINGSHARE_CLIENT_SECRET not set",
+    ),
+    Source(
+        "librarians", _staff_date, _fetch_staff,
+        validate=lambda new: len(new) >= max(20, 0.6 * len(_staff)),
+        apply=_apply_staff,
+    ),
+    Source(
+        "journals", _journals_date, journals.fetch_journals,
+        validate=lambda new: _oa is not None and len(new) >= 0.8 * len(_oa.index.journals),
+        apply=_apply_journals,
+        enabled=_oa is not None,
+        disabled_reason="no journal snapshot found",
+    ),
+])
 
 
 class ChatRequest(BaseModel):
@@ -520,8 +602,13 @@ def _finish_research_mode(parsed: dict, raw_text: str, messages: list[dict]) -> 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "catalog_size": len(_by_name), "librarians": len(_staff),
-            "journals": len(_oa.index.journals) if _oa else 0}
+    return {
+        "status": "ok",
+        "catalog_size": len(_by_name),
+        "librarians": len(_staff),
+        "journals": len(_oa.index.journals) if _oa else 0,
+        "data": _refresher.status(),
+    }
 
 
 @app.post("/chat")
