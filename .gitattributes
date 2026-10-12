@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Scripts must keep LF line endings on every machine: a CRLF shebang line makes
+# the shell look for an interpreter named "bash\r" and fail.
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
