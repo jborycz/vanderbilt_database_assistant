@@ -3,6 +3,7 @@
 
 Usage:
   python3 refresh_data.py staff       # librarian roster -> data/staff_YYYYMMDD.json
+  python3 refresh_data.py journals    # open-access journals -> data/journals_YYYYMMDD.json.gz
 
 Hand-maintained exceptions for the roster live in data/staff_overrides.json.
 After refreshing, commit the new file and run ./redeploy.sh to ship it.
@@ -17,7 +18,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
 sys.path.insert(0, str(PROJECT_DIR))
 
-from backend import staff  # noqa: E402
+from backend import journals, staff  # noqa: E402
 
 
 def refresh_staff() -> None:
@@ -30,7 +31,15 @@ def refresh_staff() -> None:
     print(f"Saved {len(people)} research contacts ({with_office} with office) -> {out}")
 
 
-COMMANDS = {"staff": refresh_staff}
+def refresh_journals() -> None:
+    print("Fetching journals from the Open Journal Finder...")
+    items = journals.fetch_journals(progress=print)
+    out = DATA_DIR / f"journals_{date.today():%Y%m%d}.json.gz"
+    journals.save_snapshot(out, items)
+    print(f"Saved {len(items)} journals ({out.stat().st_size // 1024} KB) -> {out}")
+
+
+COMMANDS = {"staff": refresh_staff, "journals": refresh_journals}
 
 if __name__ == "__main__":
     wanted = sys.argv[1:] or list(COMMANDS)

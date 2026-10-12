@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import staff
+from backend import journals, staff
+from backend.oa import OpenAccessAssistant
 
 PRIMO_SEARCH_URL = (
     "https://catalog.library.vanderbilt.edu/discovery/search"
@@ -366,6 +367,11 @@ _staff_path = staff.latest_snapshot(_DATA_DIR)
 _staff = staff.load_snapshot(_staff_path) if _staff_path else []
 _staff_by_id = {p["id"]: p for p in _staff}
 _client = anthropic.Anthropic()
+_journals_path = journals.latest_snapshot(_DATA_DIR)
+_oa = (
+    OpenAccessAssistant(_client, journals.JournalIndex(journals.load_snapshot(_journals_path)))
+    if _journals_path else None
+)
 _system = [
     {"type": "text", "text": SYSTEM_PROMPT},
     {"type": "text", "text": _catalog_text, "cache_control": {"type": "ephemeral"}},
@@ -500,7 +506,8 @@ def _finish_research_mode(parsed: dict, raw_text: str, messages: list[dict]) -> 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "catalog_size": len(_by_name), "librarians": len(_staff)}
+    return {"status": "ok", "catalog_size": len(_by_name), "librarians": len(_staff),
+            "journals": len(_oa.index.journals) if _oa else 0}
 
 
 @app.post("/chat")
@@ -617,3 +624,26 @@ def chat_stream(req: ChatRequest, request: Request):
         yield _sse({"type": "final", **result})
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.post("/oa/chat")
+def oa_chat(req: ChatRequest, request: Request):
+    """Open Access Assistant: journal recommendations under Vanderbilt's
+    publisher agreements (see backend/oa.py)."""
+    if not _check_rate_limit(_client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait a moment and try again.")
+    if _oa is None:
+        raise HTTPException(status_code=503, detail="Journal data is not loaded on this server.")
+
+    screened = _screen_message(_last_user_text(req.messages))
+    if screened:
+        return {
+            "mode": "chat", "text": screened,
+            "raw_assistant_message": json.dumps({"action": "chat", "reply": screened}),
+        }
+    try:
+        return _oa.respond(req.messages)
+    except anthropic.APIError as exc:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}") from exc
+    except (json.JSONDecodeError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=502, detail=f"Model returned unusable output: {exc}") from exc
