@@ -503,6 +503,48 @@
     }
     .toolbar-btn:hover { border-color: var(--gold); background: var(--white); }
 
+    /* ── Sidebar sections ── */
+    .chat-section-head {
+      padding: 0.7rem 0.6rem 0.2rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dark-gold);
+    }
+    .chat-section-head:first-child { padding-top: 0.2rem; }
+
+    /* ── Assistant switch ── */
+    .mode-switch { margin-left: auto; display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .toolbar-btn.active { background: var(--gold); border-color: var(--gold); color: var(--black); font-weight: 600; }
+
+    /* ── Open Access journal cards ── */
+    .oa-note {
+      background: #FFF7E6;
+      border: 1px solid #EBD9A8;
+      color: #6B5521;
+      border-radius: 8px;
+      padding: 0.55rem 0.8rem;
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+    .oa-badges { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .oa-badge {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--muted);
+    }
+    .oa-badge.good { background: #E7F4EA; border-color: #B9DDC1; color: #1F6B33; }
+    .oa-badge.ok   { background: #EAF2FB; border-color: #BCD3EE; color: #1F5F9E; }
+    .oa-badge.warn { background: #FDECEA; border-color: #F0C2BD; color: #9A2B22; }
+    .oa-fact { font-size: 0.82rem; color: var(--black); line-height: 1.45; }
+    .oa-fact.muted { color: var(--muted); font-size: 0.78rem; }
+    .oa-disclaimer { font-size: 0.74rem; font-style: italic; color: var(--muted); margin-top: 0.3rem; }
+
     /* ── Export menu ── */
     .export-menu { position: relative; }
     .export-dropdown {
@@ -668,8 +710,8 @@
       <button class="hamburger" id="hamburger" type="button" aria-label="Toggle chat history">☰</button>
       <div class="logo">V</div>
       <div>
-        <h1>Vanderbilt Database Assistant</h1>
-        <p>AI-powered research database suggestions</p>
+        <h1 id="app-title">Vanderbilt Database Assistant</h1>
+        <p id="app-subtitle">AI-powered research database suggestions</p>
       </div>
     </header>
 
@@ -681,6 +723,10 @@
           <button id="export-download-btn" type="button" role="menuitem">Download .md</button>
           <button id="export-print-btn" type="button" role="menuitem">Print</button>
         </div>
+      </div>
+      <div class="mode-switch" role="group" aria-label="Choose assistant">
+        <button class="toolbar-btn" id="mode-database-btn" type="button" aria-pressed="true">Database Assistant</button>
+        <button class="toolbar-btn" id="mode-oa-btn" type="button" aria-pressed="false">Open Access Assistant</button>
       </div>
     </div>
 
@@ -702,6 +748,26 @@
 
   const STORAGE_KEY = "vdba.chats.v1";
   const MAX_TITLE_LEN = 48;
+  const KINDS = {
+    database: {
+      title: "Vanderbilt Database Assistant",
+      subtitle: "AI-powered research database suggestions",
+      placeholder: "Describe your research topic…",
+    },
+    oa: {
+      title: "Open Access Assistant",
+      subtitle: "Journals with Vanderbilt open-access publishing agreements",
+      placeholder: "Describe your manuscript, or name a similar journal…",
+    },
+  };
+  const OA_SUGGESTIONS = [
+    "Machine learning for early sepsis detection",
+    "Journals similar to JAMA Network Open",
+    "Fully open access journals in climate economics",
+    "Top-quartile nursing journals with APC waivers",
+  ];
+  const OPEN_JOURNAL_FINDER_URL = "https://vanderbilt.openjournalfinder.com";
+  const AUTHOR_SERVICES_URL = "https://researchguides.library.vanderbilt.edu/AuthorServices/vuoaagreements";
   const SUGGESTIONS = [
     "Mental health interventions",
     "Climate change policy",
@@ -721,6 +787,10 @@
   const inputEl      = document.getElementById("user-input");
   const sendBtn      = document.getElementById("send-btn");
 
+  const appTitleEl        = document.getElementById("app-title");
+  const appSubtitleEl     = document.getElementById("app-subtitle");
+  const modeDatabaseBtn   = document.getElementById("mode-database-btn");
+  const modeOaBtn         = document.getElementById("mode-oa-btn");
   const exportMenuEl      = document.getElementById("export-menu");
   const exportBtn         = document.getElementById("export-btn");
   const exportDropdownEl  = document.getElementById("export-dropdown");
@@ -752,10 +822,20 @@
     return "c_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
 
-  function createChat() {
+  function kindOf(chat) {
+    return chat && chat.kind === "oa" ? "oa" : "database";
+  }
+
+  function currentKind() {
+    const chat = activeChat();
+    return chat ? kindOf(chat) : "database";
+  }
+
+  function createChat(kind = currentKind()) {
     const id = newId();
     const chat = {
       id,
+      kind,
       title: "New chat",
       created_at: Date.now(),
       updated_at: Date.now(),
@@ -780,9 +860,13 @@
 
   function deleteChat(id) {
     if (!store.chats[id]) return;
+    const kind = kindOf(store.chats[id]);
     delete store.chats[id];
     if (store.active_id === id) {
-      const remaining = sortedChats();
+      // Prefer another chat of the same assistant, else any chat.
+      const all = sortedChats();
+      const sameKind = all.filter(c => kindOf(c) === kind);
+      const remaining = sameKind.length ? sameKind : all;
       store.active_id = remaining.length ? remaining[0].id : null;
     }
     saveStore();
@@ -815,6 +899,7 @@
       let content = t.raw_assistant_message;
       if (!content) {
         if (t.mode === "chat") content = JSON.stringify({ mode: "chat", text: t.text || "" });
+        else if (t.mode === "oa") content = JSON.stringify({ action: "recommend", recommended: ((t.payload || {}).journals || []).map(j => j.name) });
         else content = JSON.stringify(t.payload || {});
       }
       return { role: "assistant", content };
@@ -843,13 +928,17 @@
   // ── Sidebar rendering ──────────────────────────────────────────────────────
   function renderChatList() {
     chatListEl.innerHTML = "";
-    const chats = sortedChats();
-    if (chats.length === 0) {
-      chatListEl.appendChild(el("div", { className: "chat-list-empty", text: "No chats yet." }));
-      return;
-    }
-    for (const chat of chats) {
-      chatListEl.appendChild(renderChatRow(chat));
+    const all = sortedChats();
+    for (const kind of ["database", "oa"]) {
+      chatListEl.appendChild(el("div", { className: "chat-section-head", text: KINDS[kind].title }));
+      const chats = all.filter(c => kindOf(c) === kind);
+      if (chats.length === 0) {
+        chatListEl.appendChild(el("div", { className: "chat-list-empty", text: "No chats yet." }));
+        continue;
+      }
+      for (const chat of chats) {
+        chatListEl.appendChild(renderChatRow(chat));
+      }
     }
   }
 
@@ -935,11 +1024,17 @@
 
   // ── Chat body rendering ────────────────────────────────────────────────────
   function renderWelcome() {
+    const isOa = currentKind() === "oa";
     const welcome = el("div", { className: "welcome" });
-    welcome.appendChild(el("h2", { text: "Find the right database for your research" }));
-    welcome.appendChild(el("p", { text: "Describe your research topic and I'll recommend five Vanderbilt Libraries databases with ready-to-paste search strings." }));
+    if (isOa) {
+      welcome.appendChild(el("h2", { text: "Find a journal under Vanderbilt's open-access agreements" }));
+      welcome.appendChild(el("p", { text: "Describe your manuscript, or name a journal you'd like something similar to. I'll match journals with a current Vanderbilt publisher agreement by scope, impact (SJR quartile), and the fee waiver or discount available." }));
+    } else {
+      welcome.appendChild(el("h2", { text: "Find the right database for your research" }));
+      welcome.appendChild(el("p", { text: "Describe your research topic and I'll recommend five Vanderbilt Libraries databases with ready-to-paste search strings." }));
+    }
     const suggestions = el("div", { className: "suggestions" });
-    for (const s of SUGGESTIONS) {
+    for (const s of (isOa ? OA_SUGGESTIONS : SUGGESTIONS)) {
       const chip = el("button", {
         className: "chip",
         text: s,
@@ -948,6 +1043,15 @@
       suggestions.appendChild(chip);
     }
     welcome.appendChild(suggestions);
+    if (isOa) {
+      const links = el("p", { className: "oa-disclaimer" });
+      links.appendChild(document.createTextNode("Or browse the "));
+      links.appendChild(el("a", { href: OPEN_JOURNAL_FINDER_URL, target: "_blank", rel: "noopener noreferrer", text: "Open Journal Finder" }));
+      links.appendChild(document.createTextNode(" and read the "));
+      links.appendChild(el("a", { href: AUTHOR_SERVICES_URL, target: "_blank", rel: "noopener noreferrer", text: "Vanderbilt Open Author Services guide" }));
+      links.appendChild(document.createTextNode("."));
+      welcome.appendChild(links);
+    }
     messagesEl.appendChild(welcome);
   }
 
@@ -1116,7 +1220,135 @@
     messagesEl.appendChild(el("div", { className: "bubble assistant", text }));
   }
 
+  function applyKindUI() {
+    const kind = currentKind();
+    const cfg = KINDS[kind];
+    appTitleEl.textContent = cfg.title;
+    appSubtitleEl.textContent = cfg.subtitle;
+    document.title = cfg.title;
+    inputEl.placeholder = cfg.placeholder;
+    modeDatabaseBtn.classList.toggle("active", kind === "database");
+    modeOaBtn.classList.toggle("active", kind === "oa");
+    modeDatabaseBtn.setAttribute("aria-pressed", String(kind === "database"));
+    modeOaBtn.setAttribute("aria-pressed", String(kind === "oa"));
+  }
+
+  // ── Open Access journal results ────────────────────────────────────────────
+  function fmtMoney(n, cur) {
+    try {
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: cur || "USD", maximumFractionDigits: 0 }).format(n);
+    } catch {
+      return `${cur || ""} ${Math.round(n).toLocaleString("en-US")}`.trim();
+    }
+  }
+
+  function costSummary(c) {
+    const list = c.list_apc, cur = c.currency;
+    switch (c.benefit_type) {
+      case "waived":
+        return {
+          label: c.capped ? "APC waived (capped agreement)" : "APC waived",
+          tone: "good",
+          line: list != null
+            ? `List APC ${fmtMoney(list, cur)} → ${fmtMoney(0, cur)} with the Vanderbilt agreement${c.capped ? ", while capped funds last" : ""}.`
+            : "APC waived with the Vanderbilt agreement.",
+        };
+      case "discount":
+        return {
+          label: `${c.discount_pct}% APC discount`,
+          tone: "ok",
+          line: list != null && c.price_with_agreement != null
+            ? `List APC ${fmtMoney(list, cur)} → about ${fmtMoney(c.price_with_agreement, cur)} after the ${c.discount_pct}% discount.`
+            : `${c.discount_pct}% discount on the APC.`,
+        };
+      case "allocated_out":
+        return {
+          label: "Waivers fully allocated",
+          tone: "warn",
+          line: (list != null ? `List APC ${fmtMoney(list, cur)}. ` : "") +
+                "This year's waiver funds for this publisher are fully allocated, so confirm availability before submitting.",
+        };
+      default:
+        return {
+          label: c.benefit || "No benefit listed",
+          tone: "none",
+          line: list != null ? `List APC ${fmtMoney(list, cur)}.` : "",
+        };
+    }
+  }
+
+  function metricsLine(m) {
+    const parts = [];
+    if (m.sjr != null) parts.push(`SJR ${m.sjr}${m.quartile ? ` (Q${m.quartile})` : ""}`);
+    else if (m.quartile) parts.push(`SJR quartile Q${m.quartile}`);
+    if (m.h_index != null) parts.push(`h-index ${m.h_index}`);
+    if (m.citedness != null) parts.push(`2-yr mean citedness ${m.citedness}`);
+    return parts.join(" · ") || "Impact metrics not available";
+  }
+
+  function renderJournalCard(j, i) {
+    const badge = el("span", { className: "badge", text: String(i + 1) });
+    const nameNode = el("a", {
+      className: "card-name", href: j.finder_url, target: "_blank", rel: "noopener noreferrer", text: j.name,
+    });
+    nameNode.appendChild(el("span", { className: "ext", text: "↗" }));
+    const head = el("div", { className: "card-head" }, badge, nameNode);
+
+    const meta = el("div", { className: "card-desc", text: [j.publisher, j.oa_model].filter(Boolean).join(" · ") });
+
+    const cs = costSummary(j.cost);
+    const badges = el("div", { className: "oa-badges" }, el("span", { className: `oa-badge ${cs.tone}`, text: cs.label }));
+
+    const parts = [head, meta, badges];
+    if (cs.line) parts.push(el("div", { className: "oa-fact", text: cs.line }));
+    parts.push(el("div", { className: "oa-fact", text: metricsLine(j.metrics) }));
+    if ((j.subjects || []).length) parts.push(el("div", { className: "oa-fact muted", text: "Subjects: " + j.subjects.join(", ") }));
+    if (j.why) parts.push(el("div", { className: "card-why", text: j.why }));
+
+    const actions = el("div", { className: "actions" });
+    actions.appendChild(el("a", { className: "action-btn", href: j.finder_url, target: "_blank", rel: "noopener noreferrer", text: "View in Open Journal Finder" }));
+    const home = safeHttpUrl(j.homepage);
+    if (home) actions.appendChild(el("a", { className: "action-btn secondary", href: home, target: "_blank", rel: "noopener noreferrer", text: "Journal website" }));
+    parts.push(actions);
+
+    return el("div", { className: "card" }, ...parts);
+  }
+
+  function renderOaFooter(payload) {
+    const f = el("div", { className: "fallback-link" });
+    const l1 = el("div");
+    l1.appendChild(document.createTextNode("Browse and filter every journal with a Vanderbilt agreement in the "));
+    l1.appendChild(el("a", { href: safeHttpUrl(payload.finder_search_url) || OPEN_JOURNAL_FINDER_URL, target: "_blank", rel: "noopener noreferrer", text: "Open Journal Finder" }));
+    l1.appendChild(document.createTextNode("."));
+    f.appendChild(l1);
+    const l2 = el("div");
+    l2.appendChild(document.createTextNode("Check eligibility and agreement terms in the "));
+    l2.appendChild(el("a", { href: AUTHOR_SERVICES_URL, target: "_blank", rel: "noopener noreferrer", text: "Vanderbilt Open Author Services guide" }));
+    l2.appendChild(document.createTextNode("."));
+    f.appendChild(l2);
+    f.appendChild(el("div", {
+      className: "oa-disclaimer",
+      text: "Impact is shown as SJR, SJR quartile, h-index and 2-year mean citedness, not Clarivate impact factors, and acceptance rates are not available. The explanations are AI-generated: confirm a journal's scope, fees and your eligibility before submitting.",
+    }));
+    return f;
+  }
+
+  function renderOaResult(payload) {
+    const wrap = el("div", { className: "result-set" });
+    if (payload.intro) {
+      const eq = el("div", { className: "enhanced-query" });
+      eq.appendChild(el("span", { className: "label", text: "Matching summary" }));
+      eq.appendChild(document.createTextNode(payload.intro));
+      wrap.appendChild(eq);
+    }
+    for (const note of (payload.notes || [])) wrap.appendChild(el("div", { className: "oa-note", text: note }));
+    (payload.journals || []).forEach((j, i) => wrap.appendChild(renderJournalCard(j, i)));
+    wrap.appendChild(renderOaFooter(payload));
+    messagesEl.appendChild(wrap);
+  }
+
   function renderActiveChat() {
+    applyKindUI();
     messagesEl.innerHTML = "";
     const chat = activeChat();
     if (!chat || chat.turns.length === 0) {
@@ -1126,8 +1358,15 @@
     for (const turn of chat.turns) {
       if (turn.role === "user") {
         renderUserBubble(turn.text);
+      } else if (turn.mode === "oa") {
+        renderOaResult(turn.payload || {});
       } else if (turn.mode === "chat") {
         renderAssistantTextBubble(turn.text || "");
+        if (turn.finder_search_url) {
+          const f = el("div", { className: "fallback-link" });
+          f.appendChild(el("a", { href: safeHttpUrl(turn.finder_search_url) || OPEN_JOURNAL_FINDER_URL, target: "_blank", rel: "noopener noreferrer", text: "Search the Open Journal Finder" }));
+          messagesEl.appendChild(f);
+        }
       } else {
         // Research mode, or legacy turns without a mode field.
         renderResultSet(turn.payload || {});
@@ -1144,6 +1383,20 @@
         lines.push(`**You:** ${turn.text}`, "");
       } else if (turn.mode === "chat") {
         lines.push(`**Assistant:** ${turn.text || ""}`, "");
+      } else if (turn.mode === "oa") {
+        const payload = turn.payload || {};
+        if (payload.intro) lines.push(`**Matching summary:** ${payload.intro}`, "");
+        for (const note of (payload.notes || [])) lines.push(`> ${note}`, "");
+        (payload.journals || []).forEach((j, i) => {
+          const cs = costSummary(j.cost);
+          lines.push(`${i + 1}. **${j.name}** (${j.publisher})`);
+          if (j.why) lines.push(`   - Why it fits: ${j.why}`);
+          lines.push(`   - ${j.oa_model}; ${cs.label}${cs.line ? ` - ${cs.line}` : ""}`);
+          lines.push(`   - ${metricsLine(j.metrics)}`);
+          lines.push(`   - Open Journal Finder: ${j.finder_url}`);
+          lines.push("");
+        });
+        lines.push(`Open Journal Finder: ${OPEN_JOURNAL_FINDER_URL}`, `Vanderbilt Open Author Services guide: ${AUTHOR_SERVICES_URL}`, "");
       } else {
         const payload = turn.payload || {};
         if (payload.enhanced_query) {
@@ -1168,7 +1421,7 @@
         }
       }
     }
-    lines.push("---", "Generated by the Vanderbilt Database Assistant.");
+    lines.push("---", `Generated by the ${KINDS[kindOf(chat)].title}.`);
     return lines.join("\n");
   }
 
@@ -1228,6 +1481,23 @@
     closeSidebarMobile();
   }
 
+  function switchKind(kind) {
+    const current = activeChat();
+    if (current && kindOf(current) === kind) return;
+    // Don't leave an empty placeholder chat behind when switching away.
+    if (current && current.turns.length === 0) delete store.chats[current.id];
+    const existing = sortedChats().find(c => kindOf(c) === kind);
+    if (existing) { store.active_id = existing.id; saveStore(); }
+    else createChat(kind);
+    renderChatList();
+    renderActiveChat();
+    inputEl.focus();
+    closeSidebarMobile();
+  }
+
+  modeDatabaseBtn.addEventListener("click", () => switchKind("database"));
+  modeOaBtn.addEventListener("click", () => switchKind("oa"));
+
   function createChatAndSwitch() {
     createChat();
     renderChatList();
@@ -1271,6 +1541,49 @@
     return div;
   }
 
+  async function runOaTurn(chat, firstMessage, typing) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/oa/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages(chat) }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Server returned ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+      }
+      const payload = await res.json();
+      typing.remove();
+
+      if (payload.mode === "oa") {
+        renderOaResult(payload);
+        chat.turns.push({ role: "assistant", mode: "oa", payload, raw_assistant_message: payload.raw_assistant_message });
+      } else {
+        const text = payload.text || "";
+        renderAssistantTextBubble(text);
+        const turn = { role: "assistant", mode: "chat", text, raw_assistant_message: payload.raw_assistant_message };
+        if (payload.finder_search_url) {
+          turn.finder_search_url = payload.finder_search_url;
+          const f = el("div", { className: "fallback-link" });
+          f.appendChild(el("a", { href: safeHttpUrl(payload.finder_search_url) || OPEN_JOURNAL_FINDER_URL, target: "_blank", rel: "noopener noreferrer", text: "Search the Open Journal Finder" }));
+          messagesEl.appendChild(f);
+        }
+        chat.turns.push(turn);
+      }
+      scrollBottom();
+      chat.updated_at = Date.now();
+      saveStore();
+      renderChatList();
+    } catch (err) {
+      typing.remove();
+      appendError(`Something went wrong: ${err.message}. The server may be waking up from sleep — please wait a moment and try again.`);
+      chat.turns.pop();
+      if (firstMessage) chat.title = "New chat";
+      saveStore();
+      renderChatList();
+    }
+  }
+
   async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text || sendBtn.disabled) return;
@@ -1296,6 +1609,14 @@
     scrollBottom();
 
     const typing = appendTyping();
+
+    if (kindOf(chat) === "oa") {
+      await runOaTurn(chat, firstMessage, typing);
+      sendBtn.disabled = false;
+      inputEl.focus();
+      return;
+    }
+
     let liveBubble = null; // created lazily on the first streamed delta
 
     try {

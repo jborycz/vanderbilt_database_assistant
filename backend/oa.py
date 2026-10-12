@@ -64,6 +64,8 @@ to, else null>",
 }
 
 Rules:
+- Never describe this tool's data sources or internals (do not mention Scopus, \
+databases, indexes, or how matching works).
 - Carry forward earlier topic, subjects, keywords and preferences unless the \
 author changes them.
 - "Impact factor" or "high impact"/"top tier" -> quartile_max 1 (journals are \
@@ -81,9 +83,9 @@ journal's scope fits the author's topic.
 
 Rules:
 - Use ONLY ids that appear in the shortlist.
-- For each pick, `why` is ONE sentence naming the specific overlap between the \
-journal and the topic, plus a tradeoff if relevant (e.g. broader scope, lower \
-quartile).
+- For each pick, `why` is ONE short sentence (under 30 words) naming the \
+specific overlap between the journal and the topic, plus a tradeoff if relevant \
+(e.g. broader scope, lower quartile).
 - If a reference journal is given, favor journals of similar scope and standing.
 - Do NOT state any numbers (impact, prices, discounts, acceptance rates); the \
 system displays the facts itself.
@@ -127,17 +129,38 @@ def _clean_prefs(raw) -> dict:
     }
 
 
+_PICK_RE = re.compile(
+    r'\{\s*"id"\s*:\s*"([^"]+)"\s*,\s*"why"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}'
+)
+
+
+def _salvage_picks(raw: str) -> list[dict]:
+    """Recover complete {"id", "why"} objects from a truncated or malformed
+    model reply, so one bad reply never costs the user their results."""
+    picks = []
+    for jid, why in _PICK_RE.findall(raw):
+        try:
+            why = json.loads(f'"{why}"')
+        except json.JSONDecodeError:
+            pass
+        picks.append({"id": jid, "why": why})
+    return picks
+
+
 class OpenAccessAssistant:
     def __init__(self, client: anthropic.Anthropic, index: journals.JournalIndex):
         self.client = client
         self.index = index
         self._intent_system = INTENT_SYSTEM + "\nALLOWED SUBJECTS: " + "; ".join(index.subject_terms)
 
-    def _call(self, model: str, system: str, messages: list[dict], max_tokens: int) -> dict:
+    def _raw(self, model: str, system: str, messages: list[dict], max_tokens: int) -> str:
         resp = self.client.messages.create(
             model=model, max_tokens=max_tokens, system=system, messages=messages
         )
-        return _parse_json("".join(b.text for b in resp.content if b.type == "text"))
+        return "".join(b.text for b in resp.content if b.type == "text")
+
+    def _call(self, model: str, system: str, messages: list[dict], max_tokens: int) -> dict:
+        return _parse_json(self._raw(model, system, messages, max_tokens))
 
     def respond(self, messages: list[dict]) -> dict:
         intent = self._call(INTENT_MODEL, self._intent_system, messages, 700)
@@ -167,7 +190,14 @@ class OpenAccessAssistant:
                 "so these matches are based on your topic instead."
             )
 
-        shortlist = self.index.shortlist(subjects, keywords, prefs, reference, n=40)
+        shortlist = self.index.shortlist(subjects, keywords, prefs, reference, n=40, strict_quartile=True)
+        if prefs["quartile_max"] and len(shortlist) < 5:
+            # Too few journals meet the quartile limit - relax it, and say so.
+            shortlist = self.index.shortlist(subjects, keywords, prefs, reference, n=40)
+            notes.append(
+                f"Fewer than 5 journals met every filter including SJR quartile Q{prefs['quartile_max']} or better, "
+                "so some lower-quartile journals are included."
+            )
         if not shortlist:
             msg = (
                 "I couldn't find journals with a current Vanderbilt agreement that match that. "
@@ -190,7 +220,11 @@ class OpenAccessAssistant:
             f"AUTHOR TOPIC: {topic}\nREFERENCE JOURNAL: {ref_line}\n"
             f"PREFERENCES: {json.dumps(prefs)}\n\nSHORTLIST:\n{self.index.format_shortlist(shortlist)}"
         )
-        picked = self._call(PICK_MODEL, PICK_SYSTEM, [{"role": "user", "content": pick_prompt}], 900)
+        raw_pick = self._raw(PICK_MODEL, PICK_SYSTEM, [{"role": "user", "content": pick_prompt}], 1800)
+        try:
+            picked = _parse_json(raw_pick)
+        except (json.JSONDecodeError, ValueError):
+            picked = {"intro": "", "picks": _salvage_picks(raw_pick)}
 
         by_id = {j["id"]: j for j in shortlist}
         cards, seen = [], set()

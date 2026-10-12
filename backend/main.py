@@ -207,6 +207,20 @@ def _screen_message(text: str) -> str | None:
     return None
 
 
+# The OA assistant has a different job, so it gets its own canned replies.
+_OA_SCREEN_MESSAGES = {
+    _SCREEN_INJECTION_MESSAGE: (
+        "I'm built to match authors with journals under Vanderbilt's open-access agreements, and I "
+        "can't share internal instructions or take on a different role. Describe your manuscript "
+        "topic, or name a journal you'd like something similar to."
+    ),
+    _SCREEN_HOMEWORK_MESSAGE: (
+        "I help find journals to submit to -- I don't write, edit or submit manuscripts. Tell me "
+        "about your manuscript's topic and I'll suggest journals with a Vanderbilt agreement."
+    ),
+}
+
+
 def _last_user_text(messages: list[dict]) -> str:
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -637,6 +651,7 @@ def oa_chat(req: ChatRequest, request: Request):
 
     screened = _screen_message(_last_user_text(req.messages))
     if screened:
+        screened = _OA_SCREEN_MESSAGES.get(screened, screened)
         return {
             "mode": "chat", "text": screened,
             "raw_assistant_message": json.dumps({"action": "chat", "reply": screened}),

@@ -246,7 +246,8 @@ class JournalIndex:
         return self._names[close[0]] if close else None
 
     def shortlist(self, subjects: list[str], keywords: list[str], prefs: dict | None = None,
-                  reference: dict | None = None, n: int = 40) -> list[dict]:
+                  reference: dict | None = None, n: int = 40,
+                  strict_quartile: bool = False) -> list[dict]:
         prefs = prefs or {}
         wanted = {s for s in subjects if s in self.subject_terms}
         ref_subjects = {s["term"] for s in reference["subjects"]} if reference else set()
@@ -265,6 +266,8 @@ class JournalIndex:
             if oa_type == "fully_oa" and not j["is_oa"]:
                 continue
             if oa_type == "hybrid" and j["is_oa"]:
+                continue
+            if strict_quartile and quartile_max and not (j["quartile"] and j["quartile"] <= quartile_max):
                 continue
             kind, pct = classify_benefit(j["benefit"])
             if max_price is not None:
