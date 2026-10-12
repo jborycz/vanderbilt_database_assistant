@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from backend import staff
+
 PRIMO_SEARCH_URL = (
     "https://catalog.library.vanderbilt.edu/discovery/search"
     "?query=any,contains,{q}&tab=Everything&search_scope=MyInst_and_CI"
@@ -62,6 +64,16 @@ Steps:
      user's topic, using quoted phrases, AND/OR, and 2-4 core concepts. Keep \
      it under 25 words.
 
+4) Recommend librarians. From the LIBRARIAN ROSTER provided below the \
+   catalog, choose 1-3 people best placed to help this patron with this \
+   specific topic, matching on the subject areas in their titles (e.g. \
+   "Librarian for STEM Research" for an engineering topic). Put their roster \
+   ids in `librarians`, best match first.
+   - Use ONLY ids that appear in the roster. If nobody is a reasonable \
+     subject match, return an empty list rather than guessing.
+   - Never output names, emails, phone numbers, or offices — the system \
+     attaches those from the roster.
+
 Research schema:
 
 {
@@ -75,7 +87,8 @@ Research schema:
       "search_string": "..."
     },
     ... 5 total
-  ]
+  ],
+  "librarians": [<roster id>, ...]
 }
 
 ────────────────────────────────────────────────────────────────────────────
@@ -347,12 +360,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _catalog_text, _by_name = _load_catalog()
+_staff_path = staff.latest_snapshot(_DATA_DIR)
+_staff = staff.load_snapshot(_staff_path) if _staff_path else []
+_staff_by_id = {p["id"]: p for p in _staff}
 _client = anthropic.Anthropic()
 _system = [
     {"type": "text", "text": SYSTEM_PROMPT},
     {"type": "text", "text": _catalog_text, "cache_control": {"type": "ephemeral"}},
 ]
+if _staff:
+    _system.append(
+        {"type": "text", "text": staff.format_roster(_staff), "cache_control": {"type": "ephemeral"}}
+    )
 
 
 class ChatRequest(BaseModel):
@@ -373,6 +394,35 @@ def _call_llm(messages: list[dict], max_tokens: int = 1500) -> tuple[dict, str]:
     text = "".join(block.text for block in response.content if block.type == "text")
     parsed = _parse_json_response(text)
     return parsed, text
+
+
+_LIBRARIAN_FIELDS = (
+    "id", "name", "title", "unit", "email", "phone", "office",
+    "profile_url", "connect_url", "guides_url",
+)
+
+
+def _resolve_librarians(raw_ids) -> list[dict]:
+    """Turn model-chosen roster ids into full contact records. Anything that
+    isn't a real roster id is dropped, and all contact details come from the
+    scraped directory, never from model text."""
+    if not isinstance(raw_ids, list):
+        return []
+    out: list[dict] = []
+    seen: set[int] = set()
+    for rid in raw_ids:
+        try:
+            rid = int(rid)
+        except (TypeError, ValueError):
+            continue
+        person = _staff_by_id.get(rid)
+        if person is None or rid in seen:
+            continue
+        seen.add(rid)
+        out.append({k: person.get(k, "") for k in _LIBRARIAN_FIELDS})
+        if len(out) >= 3:
+            break
+    return out
 
 
 def _finish_research_mode(parsed: dict, raw_text: str, messages: list[dict]) -> dict:
@@ -420,6 +470,7 @@ def _finish_research_mode(parsed: dict, raw_text: str, messages: list[dict]) -> 
                 break
 
     final = matched[:TARGET_RECS]
+    librarians = _resolve_librarians(parsed.get("librarians"))
 
     # Synthesize an assistant message that reflects the FINAL list, so multi-turn
     # history stays consistent with what the user actually saw.
@@ -435,19 +486,21 @@ def _finish_research_mode(parsed: dict, raw_text: str, messages: list[dict]) -> 
             }
             for r in final
         ],
+        "librarians": [p["id"] for p in librarians],
     })
 
     return {
         "mode": "research",
         "enhanced_query": enhanced_query,
         "recommendations": final,
+        "librarians": librarians,
         "raw_assistant_message": synthesized,
     }
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "catalog_size": len(_by_name)}
+    return {"status": "ok", "catalog_size": len(_by_name), "librarians": len(_staff)}
 
 
 @app.post("/chat")
